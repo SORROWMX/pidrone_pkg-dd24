@@ -52,7 +52,7 @@ stuff "python pid_controller.py\n"
 
 screen -t "SE"
 stuff "cd $(rospack find pidrone_pkg)/scripts/\n"
-stuff "python state_estimator.py -p ema\n"
+stuff "python state_estimator.py -p ukf7d\n"
 
 screen -t "Vision"
 stuff "cd $(rospack find pidrone_pkg)/scripts\n"

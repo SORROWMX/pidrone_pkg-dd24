@@ -51,6 +51,7 @@ class FlightController(object):
         self.curr_mode = 'DISARMED'         #initialize as disarmed
         self.prev_mode = 'DISARMED'         #initialize as disarmed
         # store the command to send to the flight controller
+        # Initialize with specific RPYT values: 1500, 1500, 1500, 1000
         self.command = cmds.disarm_cmd      #initialize as disarmed
         self.last_command = cmds.disarm_cmd
         # store the mode publisher
@@ -197,6 +198,7 @@ class FlightController(object):
                 self.command = cmds.arm_cmd
             elif self.prev_mode == 'ARMED':
                 self.command = cmds.idle_cmd
+
                 
     def read_rc_channels(self):
         """
@@ -375,7 +377,7 @@ def main():
                 fc.rc_display_counter = 0
 
             # update and send the flight commands to the board
-            fc.update_command()
+            fc.update_command()  # Comment out to prevent overriding our specific values
             fc.send_rc_cmd()
 
             # publish the current mode of the drone
