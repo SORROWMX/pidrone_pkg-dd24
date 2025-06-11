@@ -48,13 +48,19 @@ class StateEstimator(object):
         self.estimators = list(self.other_estimators)
         self.estimators.append(self.primary_estimator)
         
+             # Получаем текущую директорию скрипта
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        
         student_project_pkg_dir = 'pidrone_project2_ukf'
         pidrone_pkg_dir = 'pidrone_pkg'
         
         if student_ukf:
             program_str = 'rosrun ' + student_project_pkg_dir + ' StateEstimators/student_'
+            state_estimator_dir = program_str
         else:
-            program_str = 'rosrun ' + pidrone_pkg_dir + ' scripts/StateEstimators/'
+            # Используем прямой путь к файлам вместо rosrun
+            state_estimator_dir = os.path.join(current_dir, "StateEstimators")
+            
             
         # TODO: Test this IR variance argument passing
         # TODO: Test if it is necessary to include "scripts/" in this command.
