@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 import sys
 import time
 import traceback
@@ -6,6 +7,29 @@ import rospy
 from h2rMultiWii import MultiWii
 from serial import SerialException
 import command_values as cmds
+import os
+import datetime
+
+# Класс для одновременного вывода в консоль и файл
+class TeeOutput(object):
+    def __init__(self, file_path):
+        self.file = open(file_path, 'w')
+        self.stdout = sys.stdout
+        sys.stdout = self
+
+    def __del__(self):
+        sys.stdout = self.stdout
+        self.file.close()
+
+    def write(self, data):
+        self.file.write(data)
+        self.stdout.write(data)
+        self.file.flush()
+        self.stdout.flush()
+        
+    def flush(self):
+        self.file.flush()
+        self.stdout.flush()
 
 class RCChannelTester:
     """
@@ -14,6 +38,20 @@ class RCChannelTester:
     """
     
     def __init__(self):
+        # Создаем лог-файл с временной меткой
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        
+        # Создаем директорию для логов, если она не существует
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+            
+        self.log_file = os.path.join(log_dir, "rc_test_{0}.log".format(timestamp))
+        print("Logging results to: {0}".format(self.log_file))
+        
+        # Перенаправляем вывод в файл и консоль
+        self.tee = TeeOutput(self.log_file)
+        
         # Connect to the flight controller board
         self.board = self.getBoard()
         self.test_commands = [
@@ -48,6 +86,12 @@ class RCChannelTester:
             {"name": "AUX1_DISARM", "cmd": [1500, 1500, 1500, 1000, 1400, 1000, 1000, 1000]},
         ]
         
+    def __del__(self):
+        # Закрываем файл при завершении
+        if hasattr(self, 'tee'):
+            del self.tee
+            print("Log file closed.")
+        
     def getBoard(self):
         """ Connect to the flight controller board """
         try:
@@ -67,7 +111,14 @@ class RCChannelTester:
         Read RC channels from the flight controller and display them
         """
         try:
-            self.board.getData(MultiWii.RC)
+            # Попытка получить данные RC
+            result = self.board.getData(MultiWii.RC)
+            
+            # Если getData вернул None или пустой словарь, выводим сообщение и возвращаем False
+            if not result:
+                print("Failed to get RC data - no data returned")
+                return False
+                
             rc_data = self.board.rcChannels
             if rc_data:
                 print("\n--- RC Channels ---")
@@ -83,64 +134,46 @@ class RCChannelTester:
                 # Print the raw data to help with debugging
                 print("Raw channel values:")
                 for i, (key, value) in enumerate(rc_data.items()):
-                    print(f"Channel {i+1} ({key}): {value}")
+                    if key not in ['cmd', 'elapsed', 'timestamp']:  # Пропускаем служебные поля
+                        print("Channel {0} ({1}): {2}".format(i+1, key, value))
+                return True
             else:
-                print("Failed to get RC data")
+                print("Failed to get RC data - empty data")
+                return False
         except Exception as e:
             print("Error reading RC channels: %s" % e)
             print(traceback.format_exc())
-    
-    def read_arm_status(self):
-        """Read the arm status from the flight controller"""
-        try:
-            self.board.getData(MultiWii.STATUS)
-            armed = self.board.status['armed']
-            print(f"\n*** ARMED STATUS: {'ARMED' if armed else 'DISARMED'} ***\n")
-            return armed
-        except Exception as e:
-            print(f"Error reading arm status: {e}")
-            print(traceback.format_exc())
-            return None
+            return False
     
     def send_command_and_read_response(self, command_dict):
         """Send a command to the flight controller and read the response"""
         cmd = command_dict["cmd"]
         name = command_dict["name"]
         
-        print(f"\n=== SENDING {name} COMMAND ===")
-        print(f"Command values: {cmd}")
-        print(f"Expected mapping: [Roll, Pitch, Yaw, Throttle, AUX1, AUX2, AUX3, AUX4]")
-        print(f"Command indices: [ 0,    1,    2,     3,     4,    5,    6,    7 ]")
+        print("\n=== SENDING {0} COMMAND ===".format(name))
+        print("Command values: {0}".format(cmd))
+        print("Expected mapping: [Roll, Pitch, Yaw, Throttle, AUX1, AUX2, AUX3, AUX4]")
+        print("Command indices: [ 0,    1,    2,     3,     4,    5,    6,    7 ]")
         
         try:
-            # Read arm status before sending command
-            print("Before command:")
-            before_armed = self.read_arm_status()
-            
             # Send the command
             self.board.send_raw_command(8, MultiWii.SET_RAW_RC, cmd)
-            self.board.receiveDataPacket()
+            result = self.board.receiveDataPacket()
+            if result:
+                print("Command sent successfully, result: {0}".format(result))
+            else:
+                print("Command sent, but no result returned")
+                
             time.sleep(0.5)  # Give time for the command to be processed
             
             # Read back the current RC channel values
-            self.read_rc_channels()
-            
-            # Read arm status after sending command
-            print("After command:")
-            after_armed = self.read_arm_status()
-            
-            # Check if arm status changed
-            if before_armed is not None and after_armed is not None:
-                if before_armed != after_armed:
-                    if after_armed:
-                        print("\n!!! ARMING DETECTED - This command ARMED the drone !!!")
-                    else:
-                        print("\n!!! DISARMING DETECTED - This command DISARMED the drone !!!")
-                else:
-                    print("\nNo change in arm status.")
+            print("Attempting to read RC channels...")
+            success = self.read_rc_channels()
+            if not success:
+                print("Failed to read RC channels after sending command")
             
         except Exception as e:
-            print(f"Error sending {name} command: {e}")
+            print("Error sending {0} command: {1}".format(name, e))
             print(traceback.format_exc())
     
     def run_single_test(self, test_name):
@@ -149,7 +182,7 @@ class RCChannelTester:
             if test["name"] == test_name:
                 self.send_command_and_read_response(test)
                 return True
-        print(f"Test {test_name} not found!")
+        print("Test {0} not found!".format(test_name))
         return False
     
     def run_arm_disarm_test(self):
@@ -162,13 +195,6 @@ class RCChannelTester:
         self.board.receiveDataPacket()
         time.sleep(1)
         
-        # Check initial status
-        print("\nInitial status:")
-        initial_armed = self.read_arm_status()
-        if initial_armed:
-            print("WARNING: Drone is still armed after sending disarm command!")
-            return
-            
         # Try to arm
         print("\nStep 2: Testing arm command (AUX1 > 1800)...")
         arm_cmd = [1500, 1500, 1500, 1000, 1900, 1000, 1000, 1000]
@@ -176,13 +202,8 @@ class RCChannelTester:
         self.board.receiveDataPacket()
         time.sleep(1)
         
-        # Check if armed
-        mid_armed = self.read_arm_status()
-        if not mid_armed:
-            print("WARNING: Failed to arm the drone with AUX1 > 1800")
-            print("Try testing different AUX channels or values")
-        else:
-            print("SUCCESS: Drone armed successfully with AUX1 > 1800")
+        # Read RC channels to see if anything changed
+        self.read_rc_channels()
         
         # Try to disarm
         print("\nStep 3: Testing disarm command (AUX1 < 1500)...")
@@ -191,18 +212,13 @@ class RCChannelTester:
         self.board.receiveDataPacket()
         time.sleep(1)
         
-        # Check final status
-        final_armed = self.read_arm_status()
-        if final_armed:
-            print("WARNING: Failed to disarm the drone with AUX1 < 1500")
-            print("Try testing different AUX channels or values")
-            
-            # Force disarm for safety
-            print("\nForcing disarm with default command...")
-            self.board.send_raw_command(8, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
-            self.board.receiveDataPacket()
-        else:
-            print("SUCCESS: Drone disarmed successfully with AUX1 < 1500")
+        # Read RC channels again
+        self.read_rc_channels()
+        
+        # Force disarm for safety
+        print("\nForcing disarm with default command...")
+        self.board.send_raw_command(8, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
+        self.board.receiveDataPacket()
             
         print("\n=== ARM/DISARM TEST COMPLETE ===")
     
@@ -222,7 +238,7 @@ class RCChannelTester:
         print("6. Run combined arm/disarm test")
         print("7. Quit")
         
-        choice = input("\nEnter your choice (1-7): ")
+        choice = raw_input("\nEnter your choice (1-7): ")
         
         if choice == '1':
             print("\nRunning all tests...")
@@ -232,8 +248,8 @@ class RCChannelTester:
         elif choice == '2':
             print("\nAvailable tests:")
             for i, test in enumerate(self.test_commands):
-                print(f"{i+1}. {test['name']}")
-            test_idx = int(input("\nEnter test number: ")) - 1
+                print("{0}. {1}".format(i+1, test['name']))
+            test_idx = int(raw_input("\nEnter test number: ")) - 1
             if 0 <= test_idx < len(self.test_commands):
                 self.send_command_and_read_response(self.test_commands[test_idx])
             else:
@@ -278,6 +294,7 @@ class RCChannelTester:
         print("you'll need to adjust your command_values.py to match the actual mapping.")
         print("\nFor example, if throttle is actually at index 2 and yaw is at index 3,")
         print("use the fix_command_values.py script with mapping: 0,1,3,2,4,5,6,7")
+        print("\nResults have been saved to: {0}".format(self.log_file))
 
 def main():
     # Initialize ROS node
@@ -289,13 +306,16 @@ def main():
     except KeyboardInterrupt:
         print("\nTest aborted by user")
     except Exception as e:
-        print(f"Error during test: {e}")
+        print("Error during test: {0}".format(e))
         print(traceback.format_exc())
     finally:
         # Always send disarm command when done
         print("\nSending DISARM command")
         tester.board.send_raw_command(8, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
         tester.board.receiveDataPacket()
+        # Закрываем лог-файл
+        if hasattr(tester, 'tee'):
+            del tester.tee
 
 if __name__ == '__main__':
-    main() 
+    main()
