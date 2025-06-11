@@ -112,17 +112,18 @@ class MultiWii:
         self.serial_port_write_lock = Lock()
         self.serial_port_read_lock = Lock()
 
-    def create_raw_rc_packet(self,channels):
+    def create_raw_rc_packet(self, channels):
         """
         Create a MSP packet for RAW_RC command with given channel values.
-        channels: List of 8 integers, each between 1000 and 2000 representing RC channel values.
+        channels: List of integers, each between 1000 and 2000 representing RC channel values.
         """
         header = b'$M<'  # MSP header
         code = 200  # MSP code for RAW_RC
-        data_length = 16  # Length of data for 8 channels, each 2 bytes
+        data_length = len(channels) * 2  # Length of data, 2 bytes per channel
 
         # Pack the channels data into a byte string
-        data = struct.pack('<8H', *channels)
+        format_string = '<' + 'H' * len(channels)
+        data = struct.pack(format_string, *channels)
 
         # Calculate the checksum: XOR of size, code, and all bytes in data
         checksum = data_length ^ code
@@ -287,23 +288,44 @@ class MultiWii:
 
                 return self.ident
             elif code == MultiWii.RC:
-                temp = struct.unpack('<'+'hhhhhhhhhhhh',data)
-                self.rcChannels['cmd'] = code
-                self.rcChannels['roll']=temp[0]
-                self.rcChannels['pitch']=temp[1]
-                self.rcChannels['yaw']=temp[2]
-                self.rcChannels['throttle']=temp[3]
-                self.rcChannels['aux1'] = temp[4]
-                self.rcChannels['aux2'] = temp[5]
-                self.rcChannels['aux3'] = temp[6]
-                self.rcChannels['aux4'] = temp[7]
-                self.rcChannels['aux5'] = temp[8]
-                self.rcChannels['aux6'] = temp[9]
-                self.rcChannels['aux7'] = temp[10]
-                self.rcChannels['aux8'] = temp[11]
-                self.rcChannels['elapsed']= elapsed
-                self.rcChannels['timestamp']= readTime
-                return self.rcChannels
+                # Handle different RC channel data lengths
+                num_channels = datalength // 2  # Each channel is 2 bytes
+                format_string = '<' + 'h' * num_channels
+                
+                try:
+                    temp = struct.unpack(format_string, data)
+                    self.rcChannels['cmd'] = code
+                    
+                    # Always set the basic channels
+                    if num_channels >= 1:
+                        self.rcChannels['roll'] = temp[0]
+                    if num_channels >= 2:
+                        self.rcChannels['pitch'] = temp[1]
+                    if num_channels >= 3:
+                        self.rcChannels['yaw'] = temp[2]
+                    if num_channels >= 4:
+                        self.rcChannels['throttle'] = temp[3]
+                    
+                    # Set auxiliary channels if available
+                    aux_channels = min(num_channels - 4, 8)  # Up to 8 aux channels
+                    for i in range(aux_channels):
+                        self.rcChannels['aux' + str(i+1)] = temp[i+4]
+                    
+                    # Clear any remaining aux channels that weren't in the data
+                    for i in range(aux_channels, 8):
+                        if 'aux' + str(i+1) in self.rcChannels:
+                            self.rcChannels['aux' + str(i+1)] = 0
+                    
+                    self.rcChannels['elapsed'] = elapsed
+                    self.rcChannels['timestamp'] = readTime
+                    
+                    print("Received RC data with %d channels" % num_channels)
+                    return self.rcChannels
+                except struct.error as e:
+                    print("Error unpacking RC data: %s" % e)
+                    print("Data length: %d, Expected format: %s" % (datalength, format_string))
+                    print("Raw data: %s" % data)
+                    return None
 
             elif code == MultiWii.PID:
                 temp = MultiWii.PID_STRUCT.unpack(data)
