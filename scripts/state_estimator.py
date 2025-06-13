@@ -48,13 +48,18 @@ class StateEstimator(object):
         self.estimators = list(self.other_estimators)
         self.estimators.append(self.primary_estimator)
         
+        # Получаем текущую директорию скрипта
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        
         student_project_pkg_dir = 'pidrone_project2_ukf'
         pidrone_pkg_dir = 'pidrone_pkg'
         
         if student_ukf:
             program_str = 'rosrun ' + student_project_pkg_dir + ' StateEstimators/student_'
+            state_estimator_dir = program_str
         else:
-            program_str = 'rosrun ' + pidrone_pkg_dir + ' scripts/StateEstimators/'
+            # Используем прямой путь к файлам вместо rosrun
+            state_estimator_dir = os.path.join(current_dir, "StateEstimators")
             
         # TODO: Test this IR variance argument passing
         # TODO: Test if it is necessary to include "scripts/" in this command.
@@ -65,10 +70,10 @@ class StateEstimator(object):
             sim_cmd += ' --ir_var '+str(ir_var)
         
         self.process_cmds_dict = {
-                'ema': 'rosrun pidrone_pkg scripts/StateEstimators/state_estimator_ema.py',
-                'ukf2d': '{}state_estimator_ukf_2d.py'.format(program_str),
-                'ukf7d': '{}state_estimator_ukf_7d.py'.format(program_str),
-                'ukf12d': 'rosrun pidrone_pkg scripts/StateEstimators/state_estimator_ukf_12d.py',
+                'ema': 'python {}/state_estimator_ema.py'.format(state_estimator_dir),
+                'ukf2d': 'python {}/state_estimator_ukf_2d.py'.format(state_estimator_dir),
+                'ukf7d': 'python {}/state_estimator_ukf_7d.py'.format(state_estimator_dir),
+                'ukf12d': 'python {}/state_estimator_ukf_12d.py'.format(state_estimator_dir),
                 'mocap': 'rosrun pidrone_pkg scripts/state_estimator_mocap.py',  # TODO: Implement this
                 'simulator': sim_cmd
         }
