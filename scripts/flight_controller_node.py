@@ -51,15 +51,12 @@ class FlightController(object):
         self.curr_mode = 'DISARMED'         #initialize as disarmed
         self.prev_mode = 'DISARMED'         #initialize as disarmed
         # store the command to send to the flight controller
-        # Initialize with specific RPYT values: 1500, 1500, 1500, 1000
         self.command = cmds.disarm_cmd      #initialize as disarmed
         self.last_command = cmds.disarm_cmd
         # store the mode publisher
         self.modepub = None
         # store the time for angular velocity calculations
         self.time = rospy.Time.now()
-        # Counter for RC channel display
-        self.rc_display_counter = 0
 
         # Initialize the Imu Message
         ############################
@@ -99,7 +96,7 @@ class FlightController(object):
             p = msg.pitch
             y = msg.yaw
             t = msg.throttle
-            self.command = [r, p, y, t] + cmds.idle_cmd[4:10]
+            self.command = [r, p, y, t] + cmds.idle_cmd[4:8]
 
 
     # Update methods:
@@ -199,13 +196,13 @@ class FlightController(object):
             elif self.prev_mode == 'ARMED':
                 self.command = cmds.idle_cmd
 
-                
     def read_rc_channels(self):
         """
         Read RC channels from the flight controller and display them
         """
         try:
-            rc_data = self.board.getData(MultiWii.RC)
+            self.board.getData(MultiWii.RC)
+            rc_data = self.board.rcChannels
             if rc_data:
                 print("\n--- RC Channels ---")
                 print("Roll:     ", rc_data.get('roll', 'N/A'))
@@ -215,11 +212,6 @@ class FlightController(object):
                 print("***********************")
                 print("* AUX1 (5th channel): ", rc_data.get('aux1', 'N/A'), " *")
                 print("***********************")
-                print("AUX2:     ", rc_data.get('aux2', 'N/A'))
-                print("AUX3:     ", rc_data.get('aux3', 'N/A'))
-                print("AUX4:     ", rc_data.get('aux4', 'N/A'))
-                print("AUX5:     ", rc_data.get('aux5', 'N/A'))
-                print("AUX6:     ", rc_data.get('aux6', 'N/A'))
                 print("-----------------\n")
             else:
                 print("Failed to get RC data")
@@ -248,8 +240,8 @@ class FlightController(object):
 
     def send_rc_cmd(self):
         """ Send commands to the flight controller board """
-        assert len(self.command) is 10, "COMMAND HAS WRONG SIZE, expected 10, got "+str(len(self.command))
-        self.board.send_raw_command(10, MultiWii.SET_RAW_RC, self.command)
+        assert len(self.command) is 8, "COMMAND HAS WRONG SIZE, expected 8, got "+str(len(self.command))
+        self.board.send_raw_command(8, MultiWii.SET_RAW_RC, self.command)
         self.board.receiveDataPacket()
         if (self.command != self.last_command):
             print('new command sent:', self.command)
@@ -262,7 +254,7 @@ class FlightController(object):
     def ctrl_c_handler(self, signal, frame):
         """ Disarm the drone and quits the flight controller node """
         print("\nCaught ctrl-c! About to Disarm!")
-        self.board.send_raw_command(10, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
+        self.board.send_raw_command(8, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
         self.board.receiveDataPacket()
         rospy.sleep(1)
         self.modepub.publish('DISARMED')
@@ -290,7 +282,7 @@ class FlightController(object):
 
     def shouldIDisarm(self):
         """
-        Disarm the drone if there is a missing heartbeat
+        Disarm the drone if there is a missing heartbeat or if the drone is too high
         """
         curr_time = rospy.Time.now()
         disarm = False
@@ -370,14 +362,8 @@ def main():
             fc.update_imu_message()
             imupub.publish(fc.imu_message)
 
-            # Read and display RC channels every 10 iterations (about 0.17 seconds at 60Hz)
-            fc.rc_display_counter += 1
-            if fc.rc_display_counter >= 10:
-                fc.read_rc_channels()
-                fc.rc_display_counter = 0
-
             # update and send the flight commands to the board
-            fc.update_command()  # Comment out to prevent overriding our specific values
+            fc.update_command()
             fc.send_rc_cmd()
 
             # publish the current mode of the drone
@@ -395,7 +381,7 @@ def main():
     finally:
         print('Shutdown received')
         print('Sending DISARM command')
-        fc.board.send_raw_command(10, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
+        fc.board.send_raw_command(8, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
         fc.board.receiveDataPacket()
 
 
