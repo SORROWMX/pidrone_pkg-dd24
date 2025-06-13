@@ -863,20 +863,48 @@ function publishDisarm() {
 
 function publishTakeoff() {
   console.log("takeoff");
-  if (positionMsg.data == true) {
-    poseMsg.position.x = 0
-    poseMsg.position.y = 0
-    poseMsg.position.z = 0
-    positionControlPub.publish(poseMsg)
-  } else {
-    twistMsg.linear.x = 0
-    twistMsg.linear.y = 0
-    twistMsg.linear.z = 0
-    twistMsg.angular.z = 0
-    velocityControlPub.publish(twistMsg)
-  }
-  modeMsg.mode = "FLYING"
+  
+  // Сначала установим режим полета в FLYING
+  modeMsg.mode = "FLYING";
   modepub.publish(modeMsg);
+  
+  // Подождем 500мс чтобы дрон успел переключиться в режим полета
+  setTimeout(function() {
+    // Переключимся в режим позиционного управления
+    positionMsg.data = true;
+    positionPub.publish(positionMsg);
+    
+    console.log("Starting gradual takeoff sequence...");
+    
+    // Постепенно увеличиваем высоту до 0.4 метра
+    var initialHeight = 0.05;    // Начальная высота, соответствующая значению в PID контроллере
+    var targetHeight = 0.4;      // Целевая высота в метрах
+    var steps = 35;              // Больше шагов для плавного взлета
+    var interval = 150;          // Меньший интервал между шагами (мс)
+    var heightStep = (targetHeight - initialHeight) / steps;
+    
+    // Начинаем с высоты, которая изначально установлена в PID-контроллере
+    poseMsg.position.x = 0;
+    poseMsg.position.y = 0;
+    poseMsg.position.z = initialHeight;
+    positionControlPub.publish(poseMsg);
+    
+    console.log("Initial height set to: " + initialHeight.toFixed(2) + "m");
+    
+    // Постепенно увеличиваем высоту
+    for (var i = 1; i <= steps; i++) {
+      (function(step) {
+        setTimeout(function() {
+          var height = initialHeight + (heightStep * step);
+          console.log("Setting height to: " + height.toFixed(2) + "m");
+          poseMsg.position.x = 0;
+          poseMsg.position.y = 0;
+          poseMsg.position.z = height;
+          positionControlPub.publish(poseMsg);
+        }, interval * step);
+      })(i);
+    }
+  }, 500);
 }
 
 function publishTranslateLeft() {
