@@ -1,183 +1,199 @@
 #!/usr/bin/env python
 
 import rospy
+import time
+import numpy as np
+from pidrone_pkg.msg import RC
 
 
 #####################################################
 #						PID							#
 #####################################################
 class PIDaxis():
-    def __init__(self, kp, ki, kd, i_range=None, d_range=None, control_range=(1000, 2000), midpoint=1500, smoothing=True):
-        # Tuning
+    def __init__(self, kp, ki, kd, midpoint=1500, control_range=None,
+                 i_range=None, d_range=None, d_filter_size=10, init_i=0):
+        """
+        Initialize the PID controller.
+
+        Args:
+            kp: proportional gain
+            ki: integral gain
+            kd: derivative gain
+            midpoint: midpoint of the control range
+            control_range: tuple of (min, max) for the control output
+            i_range: tuple of (min, max) for the integral term
+            d_range: tuple of (min, max) for the derivative term
+            d_filter_size: size of the filter for the derivative term
+            init_i: initial value for the integral term
+        """
         self.kp = kp
         self.ki = ki
         self.kd = kd
-        # Config
+        self.midpoint = midpoint
+        self.control_range = control_range
         self.i_range = i_range
         self.d_range = d_range
-        self.control_range = control_range
-        self.midpoint = midpoint
-        self.smoothing = smoothing
-        # Internal
-        self.reset()
+        self.d_filter_size = d_filter_size
+        self.init_i = init_i
 
-    def reset(self):
-        self._old_err = None
-        self._p = 0
-        self._i = 0
-        self._d = 0
-        self._dd = 0
-        self._ddd = 0
+        self._i = init_i
+        self._prev_err = None
+        self._prev_time = None
+        self._d_filter = []
 
-    def step(self, err, time_elapsed):
-        if self._old_err is None:
-            # First time around prevent d term spike
-            self._old_err = err
+    def step(self, err, dt=None):
+        """
+        Compute the control output for a single time step.
 
-        # Find the p component
-        self._p = err * self.kp
+        Args:
+            err: current error
+            dt: time step (if None, will use time since last call)
 
-        # Find the i component
-        self._i += err * self.ki * time_elapsed
+        Returns:
+            control output
+        """
+        # Calculate dt if not provided
+        if dt is None:
+            curr_time = time.time()
+            if self._prev_time is None:
+                dt = 0
+            else:
+                dt = curr_time - self._prev_time
+            self._prev_time = curr_time
+
+        # Proportional term
+        p = self.kp * err
+
+        # Integral term
+        self._i += self.ki * err * dt
         if self.i_range is not None:
-            self._i = max(self.i_range[0], min(self._i, self.i_range[1]))
+            self._i = max(min(self._i, self.i_range[1]), self.i_range[0])
 
-        # Find the d component
-        self._d = (err - self._old_err) * self.kd / time_elapsed
-        if self.d_range is not None:
-            self._d = max(self.d_range[0], min(self._d, self.d_range[1]))
-        self._old_err = err
+        # Derivative term (with filtering)
+        if self._prev_err is None:
+            d = 0
+        else:
+            d_raw = (err - self._prev_err) / dt if dt > 0 else 0
+            
+            # Apply filtering to derivative term
+            self._d_filter.append(d_raw)
+            if len(self._d_filter) > self.d_filter_size:
+                self._d_filter.pop(0)
+            
+            # Use median filter to remove spikes
+            d = np.median(self._d_filter) * self.kd
+            
+            if self.d_range is not None:
+                d = max(min(d, self.d_range[1]), self.d_range[0])
 
-        # Smooth over the last three d terms
-        if self.smoothing:
-            self._d = (self._d * 8.0 + self._dd * 5.0 + self._ddd * 2.0)/15.0
-            self._ddd = self._dd
-            self._dd = self._d
+        self._prev_err = err
 
         # Calculate control output
-        raw_output = self._p + self._i + self._d
-        output = min(max(raw_output + self.midpoint, self.control_range[0]), self.control_range[1])
+        control = self.midpoint + p + self._i + d
 
-        return output
+        # Limit control output
+        if self.control_range is not None:
+            control = max(min(control, self.control_range[1]), self.control_range[0])
+
+        return int(control)
+
+    def reset(self):
+        """Reset the PID controller"""
+        self._i = self.init_i
+        self._prev_err = None
+        self._prev_time = None
+        self._d_filter = []
 
 
 class PID:
+    """A class that implements a generic PID controller for the drone."""
+    def __init__(self):
+        """Initialize the PID controller with default values"""
+        # Improved settings for height control with better damping
+        self.throttle = PIDaxis(0.4,  # Reduced P component for smoother response
+                               0.2,   # Reduced I component to prevent overshoot
+                               0.6,   # Increased D component for better damping
+                               i_range=(-150, 150), control_range=(1200, 1450),
+                               d_range=(-50, 50), midpoint=1350, d_filter_size=15)
 
-    def __init__(self,
+        # Roll PID controllers (low and high rates)
+        self.roll_low = PIDaxis(0.5, 0.02, 0.2,
+                               i_range=(-150, 150), control_range=(1400, 1600),
+                               d_range=(-50, 50), midpoint=1500, init_i=0)
+        self.roll_high = PIDaxis(0.5, 0.02, 0.2,
+                                i_range=(-150, 150), control_range=(1400, 1600),
+                                d_range=(-50, 50), midpoint=1500, init_i=0)
 
-                 roll=PIDaxis(2.0, 1.0, 0.0, control_range=(1400, 1600), midpoint=1500, i_range=(-100, 100)),
-                 roll_low=PIDaxis(0.0, 0.5, 0.0, control_range=(1400, 1600), midpoint=1500, i_range=(-150, 150)),
+        # Pitch PID controllers (low and high rates)
+        self.pitch_low = PIDaxis(0.5, 0.02, 0.2,
+                                i_range=(-150, 150), control_range=(1400, 1600),
+                                d_range=(-50, 50), midpoint=1500, init_i=0)
+        self.pitch_high = PIDaxis(0.5, 0.02, 0.2,
+                                 i_range=(-150, 150), control_range=(1400, 1600),
+                                 d_range=(-50, 50), midpoint=1500, init_i=0)
 
-                 pitch=PIDaxis(2.0, 1.0, 0.0, control_range=(1400, 1600), midpoint=1500, i_range=(-100, 100)),
-                 pitch_low=PIDaxis(0.0, 0.5, 0.0, control_range=(1400, 1600), midpoint=1500, i_range=(-150, 150)),
+        # Yaw PID controller
+        self.yaw = PIDaxis(0.5, 0.02, 0.2,
+                          i_range=(-150, 150), control_range=(1400, 1600),
+                          d_range=(-50, 50), midpoint=1500)
 
-                 yaw=PIDaxis(0.0, 0.0, 0.0),
+        # Adaptive control parameters
+        self.height_threshold = 0.3  # Threshold for switching between low and high rates
+        self.velocity_threshold = 0.2  # Threshold for switching between low and high rates
+        
+        # Exponential filter for throttle
+        self.throttle_filter_alpha = 0.7  # Filter coefficient (0-1)
+        self.last_throttle_cmd = 1350  # Initial throttle value
 
-                 # Kv 2300 motors have midpoint 1300, Kv 2550 motors have midpoint 1250
-                 throttle=PIDaxis(1,
-                                  0, #0.5/height_factor * battery_factor,
-                                  1,
-                                  i_range=(-400, 400), control_range=(1200, 1700),
-                                  d_range=(-40, 40), midpoint=1600)
-                 ):
+    def step(self, pid_error, desired_yaw_velocity=0):
+        """
+        Compute the control outputs for a single time step.
 
-        self.trim_controller_cap_plane = 0.05
-        self.trim_controller_thresh_plane = 0.0001
+        Args:
+            pid_error: current error in [x, y, z] (velocity errors for x,y and position error for z)
+            desired_yaw_velocity: desired yaw velocity
 
-        self.roll = roll
-        self.roll_low = roll_low
+        Returns:
+            [roll, pitch, yaw, throttle] control outputs
+        """
+        # Extract errors
+        x_error = pid_error.x
+        y_error = pid_error.y
+        z_error = pid_error.z
 
-        self.pitch = pitch
-        self.pitch_low = pitch_low
+        # Determine which rate to use based on error magnitude
+        if abs(x_error) > self.velocity_threshold:
+            roll_cmd = self.roll_high.step(x_error)
+        else:
+            roll_cmd = self.roll_low.step(x_error)
 
-        self.yaw = yaw
+        if abs(y_error) > self.velocity_threshold:
+            pitch_cmd = self.pitch_high.step(y_error)
+        else:
+            pitch_cmd = self.pitch_low.step(y_error)
 
-        self.trim_controller_cap_throttle = 5.0
-        self.trim_controller_thresh_throttle = 5.0
+        # Calculate yaw command
+        yaw_cmd = self.yaw.step(desired_yaw_velocity)
 
-        self.throttle = throttle
-
-        self._t = None
-
-        # Tuning values specific to each drone
-        self.roll_low.init_i = 0.0
-        self.pitch_low.init_i = 0.0
-        self.reset()
+        # Calculate throttle command with improved height control
+        raw_throttle_cmd = self.throttle.step(z_error)
+        
+        # Apply exponential filter to throttle for smoother response
+        filtered_throttle_cmd = (self.throttle_filter_alpha * raw_throttle_cmd + 
+                                (1 - self.throttle_filter_alpha) * self.last_throttle_cmd)
+        
+        # Update last throttle command
+        self.last_throttle_cmd = filtered_throttle_cmd
+        
+        # Return control commands
+        return [roll_cmd, pitch_cmd, yaw_cmd, int(filtered_throttle_cmd)]
 
     def reset(self):
-        """ Reset each pid and restore the initial i terms """
-        # reset time variable
-        self._t = None
-
-        # reset individual PIDs
-        self.roll.reset()
-        self.roll_low.reset()
-        self.pitch.reset()
-        self.pitch_low.reset()
+        """Reset all PID controllers"""
         self.throttle.reset()
-
-        # restore tuning values
-        self.roll_low._i = self.roll_low.init_i
-        self.pitch_low._i = self.pitch_low.init_i
-
-    def step(self, error, cmd_yaw_velocity=0):
-        """ Compute the control variables from the error using the step methods
-        of each axis pid.
-        """
-        # First time around prevent time spike
-        if self._t is None:
-            time_elapsed = 1
-        else:
-            time_elapsed = rospy.get_time() - self._t
-
-        self._t = rospy.get_time()
-
-        # Compute roll command
-        ######################
-        # if the x velocity error is within the threshold
-        if abs(error.x) < self.trim_controller_thresh_plane:
-            # pass the high rate i term off to the low rate pid
-            self.roll_low._i += self.roll._i
-            self.roll._i = 0
-            # set the roll value to just the output of the low rate pid
-            cmd_r = self.roll_low.step(error.x, time_elapsed)
-        else:
-            if error.x > self.trim_controller_cap_plane:
-                self.roll_low.step(self.trim_controller_cap_plane, time_elapsed)
-            elif error.x < -self.trim_controller_cap_plane:
-                self.roll_low.step(-self.trim_controller_cap_plane, time_elapsed)
-            else:
-                self.roll_low.step(error.x, time_elapsed)
-
-            cmd_r = self.roll_low._i + self.roll.step(error.x, time_elapsed)
-
-        # Compute pitch command
-        #######################
-        if abs(error.y) < self.trim_controller_thresh_plane:
-            self.pitch_low._i += self.pitch._i
-            self.pitch._i = 0
-            cmd_p = self.pitch_low.step(error.y, time_elapsed)
-        else:
-            if error.y > self.trim_controller_cap_plane:
-                self.pitch_low.step(self.trim_controller_cap_plane, time_elapsed)
-            elif error.y < -self.trim_controller_cap_plane:
-                self.pitch_low.step(-self.trim_controller_cap_plane, time_elapsed)
-            else:
-                self.pitch_low.step(error.y, time_elapsed)
-
-            cmd_p = self.pitch_low._i + self.pitch.step(error.y, time_elapsed)
-
-        # Compute yaw command
-        cmd_y = 1500 + cmd_yaw_velocity
-
-        cmd_t = self.throttle.step(error.z, time_elapsed)
-        
-        #cmd_t = 1250
-
-        print("%d, %.3f, %.3f, %.3f, %.3f" % (cmd_t, error.z, self.throttle._p, self.throttle._i, self.throttle._d))
-        # Print statements for the low and high i components
-        # print "Roll  low, hi:", self.roll_low._i, self.roll._i
-        # print "Pitch low, hi:", self.pitch_low._i, self.pitch._i
-        # print "Throttle low, hi:", self.throttle_low._i, self.throttle._i
-        #print cmd_t
-        return [cmd_r, cmd_p, cmd_y, cmd_t]
+        self.roll_low.reset()
+        self.roll_high.reset()
+        self.pitch_low.reset()
+        self.pitch_high.reset()
+        self.yaw.reset()
+        self.last_throttle_cmd = 1350  # Reset throttle filter

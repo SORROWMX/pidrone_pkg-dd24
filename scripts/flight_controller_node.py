@@ -282,7 +282,7 @@ class FlightController(object):
 
     def shouldIDisarm(self):
         """
-        Disarm the drone if there is a missing heartbeat or if the drone is too high
+        Check for missing heartbeats and issue warning for high altitude
         """
         curr_time = rospy.Time.now()
         disarm = False
@@ -299,9 +299,11 @@ class FlightController(object):
             print('Check the infrared node\n')
             disarm = True
 
+        # Instead of disarming at high altitude, just issue a warning
         if self.range > 0.5:
-            print(('\nSafety Failure: too high: ' + str(self.range)))
-            disarm = True            
+            print(('\nWarning: High altitude detected: ' + str(self.range) + 'm'))
+            # Don't disarm the drone, just warn the user
+            
         if curr_time - self.heartbeat_state_estimator > rospy.Duration.from_sec(1):
             print('\nSafety Failure: not receiving a state estimate.')
             print('Check the state_estimator node\n')

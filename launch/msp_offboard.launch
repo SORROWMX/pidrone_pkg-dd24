@@ -1,0 +1,24 @@
+<launch>
+    <!-- Запуск базовых компонентов -->
+    <include file="$(find pidrone_pkg)/launch/tof.launch" />
+    <include file="$(find pidrone_pkg)/launch/raspicam_node.launch" />
+    
+    <!-- Запуск модифицированных узлов -->
+    <node name="flight_controller_node" pkg="pidrone_pkg" type="flight_controller_node.py" output="screen" />
+    <node name="pid_controller" pkg="pidrone_pkg" type="pid_controller.py" output="screen" />
+    <node name="state_estimator" pkg="pidrone_pkg" type="state_estimator.py" args="-p ukf7d" output="screen" />
+    <node name="optical_flow_node" pkg="pidrone_pkg" type="optical_flow_node.py" output="screen" />
+    <node name="rigid_transform_node" pkg="pidrone_pkg" type="rigid_transform_node.py" output="screen" />
+    
+    <!-- Запуск MSP Offboard -->
+    <node name="msp_offboard" pkg="pidrone_pkg" type="msp_offboard.py" output="screen" />
+    
+    <!-- Параметры для MSP Offboard -->
+    <param name="msp_offboard/default_takeoff_height" value="0.3" />
+    <param name="msp_offboard/height_tolerance" value="0.05" />
+    <param name="msp_offboard/position_tolerance" value="0.1" />
+    
+    <!-- Запуск веб-интерфейса -->
+    <node name="rosbridge_server" pkg="rosbridge_server" type="rosbridge_websocket" output="screen" />
+    <node name="web_video_server" pkg="web_video_server" type="web_video_server" output="screen" />
+</launch> 

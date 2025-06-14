@@ -404,14 +404,11 @@ def main(ControllerClass):
         # if the drone is flying, send the fly_command
         elif pid_controller.current_mode == 'FLYING':
             if pid_controller.desired_mode == 'FLYING':
-
-                # Safety check to ensure drone does not fly too high
-                if (pid_controller.current_state.pose_with_covariance.pose.position.z >
-                0.7):
-                    fly_command = cmds.disarm_cmd
-                    print("\n disarming because drone is too high \n")
-                    break
-
+                # Instead of disarming at high altitude, just issue a warning
+                if (pid_controller.current_state.pose_with_covariance.pose.position.z > 0.7):
+                    print("\nWarning: Drone is flying too high: {:.2f}m\n".format(
+                        pid_controller.current_state.pose_with_covariance.pose.position.z))
+                    # Don't disarm the drone, just warn the user
                 # Publish the ouput of pid step method
                 pid_controller.publish_cmd(fly_command)
             # after flying, take the converged low i terms and set these as the
