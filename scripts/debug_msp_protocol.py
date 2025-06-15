@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 import time
 import sys
@@ -9,7 +10,7 @@ import json
 import os
 from h2rMultiWii import MultiWii
 
-# Добавляем поддержку ROS, если он доступен
+# Add ROS support if available
 try:
     import rospy
     from std_msgs.msg import String
@@ -332,9 +333,9 @@ class MSPProtocolDebugger:
             att_values = {}
             if attitude:
                 logger.info("\nAttitude:")
-                logger.info("  Roll:  %.2f°", attitude['angx'])
-                logger.info("  Pitch: %.2f°", attitude['angy'])
-                logger.info("  Yaw:   %.2f°", attitude['heading'])
+                logger.info("  Roll:  %.2f degrees", attitude['angx'])
+                logger.info("  Pitch: %.2f degrees", attitude['angy'])
+                logger.info("  Yaw:   %.2f degrees", attitude['heading'])
                 att_values = {
                     'roll': attitude['angx'],
                     'pitch': attitude['angy'],
