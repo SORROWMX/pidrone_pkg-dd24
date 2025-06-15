@@ -91,48 +91,41 @@ class OpticalFlowNode(object):
         x = np.clip(x, -self.max_flow_threshold, self.max_flow_threshold)
         y = np.clip(y, -self.max_flow_threshold, self.max_flow_threshold)
         
-        # Data quality assessment
-        # Calculate percentage of "good" vectors (not too large and not too small)
+        # Calculate data quality for logging purposes but don't use it for filtering
         good_vectors = np.logical_and(
             np.logical_and(np.abs(x) < self.max_flow_threshold, np.abs(y) < self.max_flow_threshold),
             np.logical_or(np.abs(x) > self.min_flow_threshold, np.abs(y) > self.min_flow_threshold)
         )
         quality = np.mean(good_vectors) if len(good_vectors) > 0 else 0.0
         
-        # Publish data quality
+        # Publish data quality for monitoring purposes
         self.quality_pub.publish(Float32(quality))
         
-        # If data quality is low, use previous values
-        if quality < self.quality_threshold:
-            x_motion = self.last_x_motion
-            y_motion = self.last_y_motion
-            rospy.logdebug("Low quality optical flow data: {:.2f}, using previous values".format(quality))
-        else:
-            # Calculate motion based on height
-            # Get adaptive coefficient based on height
-            height_coeff = self.get_height_coefficient(self.altitude)
-            
-            # Calculate motion considering height and adaptive coefficient
-            x_motion = np.sum(x) * self.flow_coeff * self.altitude * height_coeff
-            y_motion = np.sum(y) * self.flow_coeff * self.altitude * height_coeff
-            
-            # Add values to buffer for filtering
-            self.x_buffer.append(x_motion)
-            self.y_buffer.append(y_motion)
-            
-            # Apply median filter to remove outliers
-            if len(self.x_buffer) >= 3:
-                x_motion = np.median(self.x_buffer)
-                y_motion = np.median(self.y_buffer)
-            
-            # Apply exponential filter for smoothing
-            x_motion = self.alpha * x_motion + (1 - self.alpha) * self.last_x_motion
-            y_motion = self.alpha * y_motion + (1 - self.alpha) * self.last_y_motion
-            
-            # Save current values for next iteration
-            self.last_x_motion = x_motion
-            self.last_y_motion = y_motion
-            self.last_quality = quality
+        # Always process data regardless of quality
+        # Get adaptive coefficient based on height
+        height_coeff = self.get_height_coefficient(self.altitude)
+        
+        # Calculate motion considering height and adaptive coefficient
+        x_motion = np.sum(x) * self.flow_coeff * self.altitude * height_coeff
+        y_motion = np.sum(y) * self.flow_coeff * self.altitude * height_coeff
+        
+        # Add values to buffer for filtering
+        self.x_buffer.append(x_motion)
+        self.y_buffer.append(y_motion)
+        
+        # Apply median filter to remove outliers
+        if len(self.x_buffer) >= 3:
+            x_motion = np.median(self.x_buffer)
+            y_motion = np.median(self.y_buffer)
+        
+        # Apply exponential filter for smoothing
+        x_motion = self.alpha * x_motion + (1 - self.alpha) * self.last_x_motion
+        y_motion = self.alpha * y_motion + (1 - self.alpha) * self.last_y_motion
+        
+        # Save current values for next iteration
+        self.last_x_motion = x_motion
+        self.last_y_motion = y_motion
+        self.last_quality = quality
         
         # Create and publish velocity message
         twist_msg = TwistStamped()
@@ -148,6 +141,11 @@ class OpticalFlowNode(object):
             twist_msg.twist.linear.y /= dt
         
         self.last_update_time = twist_msg.header.stamp
+        
+        # Log the velocity being published
+        speed = np.sqrt(twist_msg.twist.linear.x**2 + twist_msg.twist.linear.y**2)
+        rospy.loginfo("Publishing velocity - x: %.3f, y: %.3f, speed: %.3f m/s", 
+                     twist_msg.twist.linear.x, twist_msg.twist.linear.y, speed)
         
         # Publish velocity message
         self.twistpub.publish(twist_msg)

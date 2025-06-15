@@ -964,17 +964,34 @@ class MSPOffboard:
 
 def main():
     import sys
+    import traceback
     filtered_argv = rospy.myargv(argv=sys.argv)
     
     try:
+        print("Starting MSP Offboard node")
         offboard = MSPOffboard()
+        print("MSP Offboard node initialized - entering spin")
         rospy.spin()
     except rospy.ROSInterruptException:
-        pass
+        print("ROS Interrupt received")
+    except SerialException as e:
+        print('\nCannot connect to the flight controller board:', e)
+        print('The USB may be unplugged. Please check connection.')
     except Exception as e:
-        rospy.logerr("Error: {0}".format(e))
-        import traceback
-        traceback.print_exc() 
+        print("Error:", e)
+        print(traceback.format_exc())
+    finally:
+        # Ensure safe shutdown
+        print('Shutdown received')
+        try:
+            if 'offboard' in locals() and hasattr(offboard, 'board') and offboard.board is not None:
+                print('Sending DISARM command before exit')
+                offboard.board.send_raw_command(8, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
+                offboard.board.receiveDataPacket()
+                print('DISARM command sent')
+        except Exception as e:
+            print('Error during shutdown:', e)
+            print(traceback.format_exc())
 
 if __name__ == '__main__':
     main() 
