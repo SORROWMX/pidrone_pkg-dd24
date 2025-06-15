@@ -98,14 +98,14 @@ class MSPProtocolDebugger:
             os.makedirs(log_dir)
         
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        self.log_file = os.path.join(log_dir, f"msp_protocol_{timestamp}.log")
+        self.log_file = os.path.join(log_dir, "msp_protocol_{}.log".format(timestamp))
         
         with open(self.log_file, 'w') as f:
             f.write("# MSP Protocol Debug Log\n")
-            f.write(f"# Started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("# Started: {}\n".format(time.strftime('%Y-%m-%d %H:%M:%S')))
             f.write("# Format: timestamp,type,data\n")
         
-        logger.info(f"Logging to file: {self.log_file}")
+        logger.info("Logging to file: {}".format(self.log_file))
     
     def _log_to_file(self, log_type, data):
         """Log data to file"""
@@ -116,9 +116,9 @@ class MSPProtocolDebugger:
             with open(self.log_file, 'a') as f:
                 timestamp = time.time()
                 json_data = json.dumps(data)
-                f.write(f"{timestamp},{log_type},{json_data}\n")
+                f.write("{},{},{}\n".format(timestamp, log_type, json_data))
         except Exception as e:
-            logger.error(f"Failed to write to log file: {e}")
+            logger.error("Failed to write to log file: {}".format(e))
     
     def _publish_to_ros(self, data_type, data):
         """Publish data to ROS topic if available"""
@@ -133,7 +133,7 @@ class MSPProtocolDebugger:
             }
             self.debug_pub.publish(json.dumps(msg_data))
         except Exception as e:
-            logger.error(f"Failed to publish to ROS: {e}")
+            logger.error("Failed to publish to ROS: {}".format(e))
     
     def _publish_packet_to_ros(self, direction, packet_data):
         """Publish packet data to ROS topic if available"""
@@ -148,7 +148,7 @@ class MSPProtocolDebugger:
             }
             self.packet_pub.publish(json.dumps(msg_data))
         except Exception as e:
-            logger.error(f"Failed to publish packet to ROS: {e}")
+            logger.error("Failed to publish packet to ROS: {}".format(e))
 
     def monitor_raw_communication(self, duration=10):
         """Monitor raw communication with the flight controller"""
@@ -415,25 +415,25 @@ class MSPProtocolDebugger:
             return False
     
     def save_log_to_file(self, filename=None):
-        """Save current debug data to a file"""
-        if not filename:
-            timestamp = time.strftime("%Y%m%d-%H%M%S")
-            filename = f"msp_protocol_export_{timestamp}.json"
-        
+        """Save the entire log to a JSON file"""
         try:
+            if not filename:
+                timestamp = time.strftime("%Y%m%d-%H%M%S")
+                filename = "msp_protocol_export_{}.json".format(timestamp)
+            
             with open(filename, 'w') as f:
                 json.dump(self.data_log, f, indent=2)
             
-            logger.info(f"Log saved to {filename}")
+            logger.info("Log saved to {}".format(filename))
             
-            # Publish filename to log topic
+            # Publish to ROS if available
             if ROS_AVAILABLE and self.log_pub:
-                self.log_pub.publish(f"Log saved to {filename}")
+                self.log_pub.publish("Log saved to {}".format(filename))
             
-            return True
+            return filename
         except Exception as e:
-            logger.error(f"Failed to save log: {e}")
-            return False
+            logger.error("Failed to save log: {}".format(e))
+            return None
     
     def close(self):
         """Clean up resources"""
