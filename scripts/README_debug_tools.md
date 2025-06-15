@@ -118,13 +118,13 @@ python scripts/inspect_command_values.py --action update --order throttle yaw ro
 
 ```bash
 # Мониторинг коммуникации
-python scripts/debug_msp_protocol.py --action monitor --duration 30 --log-file --ros
+python debug_msp_protocol.py --action monitor --duration 30 --log-file --ros
 
 # Тестирование порядка команд
-python scripts/debug_msp_protocol.py --action test_order --log-file
+python debug_msp_protocol.py --action test_order --log-file
 
 # Выполнение всех действий
-python scripts/debug_msp_protocol.py --action all --duration 20 --export msp_protocol_log.json
+python debug_msp_protocol.py --action all --duration 20 --export msp_protocol_log.json
 ```
 
 ### ROS топики:

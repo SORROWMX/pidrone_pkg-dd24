@@ -96,7 +96,7 @@ class FlightController(object):
             p = msg.pitch
             y = msg.yaw
             t = msg.throttle
-            self.command = [r, p, y, t] + cmds.idle_cmd[4:8]
+            self.command = [r, p, t, y] + cmds.idle_cmd[4:8]
 
 
     # Update methods:

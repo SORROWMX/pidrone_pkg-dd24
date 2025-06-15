@@ -326,8 +326,8 @@ class PIDController(object):
         msg = RC()
         msg.roll = cmd[0]
         msg.pitch = cmd[1]
-        msg.yaw = cmd[2]
-        msg.throttle = cmd[3]
+        msg.throttle = cmd[2]  # Change from yaw to throttle
+        msg.yaw = cmd[3]       # Change from throttle to yaw
         self.cmdpub.publish(msg)
 
 

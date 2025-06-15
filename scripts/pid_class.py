@@ -154,7 +154,7 @@ class PID:
             desired_yaw_velocity: desired yaw velocity
 
         Returns:
-            [roll, pitch, yaw, throttle] control outputs
+            [roll, pitch, throttle, yaw] control outputs
         """
         # Extract errors
         x_error = pid_error.x
@@ -186,7 +186,7 @@ class PID:
         self.last_throttle_cmd = filtered_throttle_cmd
         
         # Return control commands
-        return [roll_cmd, pitch_cmd, yaw_cmd, int(filtered_throttle_cmd)]
+        return [roll_cmd, pitch_cmd, int(filtered_throttle_cmd), yaw_cmd]
 
     def reset(self):
         """Reset all PID controllers"""

@@ -1,5 +1,5 @@
 # [r,p,y,t]
-# Format: [roll, pitch, yaw, throttle, aux1, aux2, aux3, aux4]
+# Format: [roll, pitch, throttle, yaw, aux1, aux2, aux3, aux4]
 # AUX1 is used for arming/disarming:
 # - AUX1 < 1500: disarmed
 # - AUX1 > 1800: armed

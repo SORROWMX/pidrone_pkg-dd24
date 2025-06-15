@@ -190,7 +190,7 @@ class MSPOffboard:
         throttle_cmd = max(min(throttle_cmd, 1700), 1300)
         
         # Update command
-        self.current_command = [roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd, 1900, 1000, 1000, 1000]
+        self.current_command = [roll_cmd, pitch_cmd, throttle_cmd, yaw_cmd, 1900, 1000, 1000, 1000]
     
     def _update_velocity_control(self):
         """Update command in velocity control mode"""
@@ -211,7 +211,7 @@ class MSPOffboard:
         yaw_cmd = max(min(yaw_cmd, 1700), 1300)
         
         # Update command
-        self.current_command = [roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd, 1900, 1000, 1000, 1000]
+        self.current_command = [roll_cmd, pitch_cmd, throttle_cmd, yaw_cmd, 1900, 1000, 1000, 1000]
     
     def arm(self):
         """Enable motors using aux1 channel"""
