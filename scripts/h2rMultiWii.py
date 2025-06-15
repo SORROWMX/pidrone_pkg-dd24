@@ -218,7 +218,7 @@ class MultiWii:
                 return None
             elif header[0] != '$':
                 print("Didn't get valid header: ", header)
-                raise
+                raise ValueError("Invalid header format")
 
             datalength = MultiWii.codeS.unpack(header[-2])[0]
             code = MultiWii.codeS.unpack(header[-1])[0]
@@ -379,7 +379,7 @@ class MultiWii:
                 return "Set Raw RC"
             else:
                 print("No return error!: %d" % code)
-                raise
+                raise ValueError("Unsupported code: {}".format(code))
 
     """ Implement me to check the checksum. """
     def checkChecksum(self, data, checksum):
