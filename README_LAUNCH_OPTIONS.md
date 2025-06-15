@@ -1,52 +1,55 @@
 # PiDrone Launch Options
 
-This README explains the different launch options available for the PiDrone package.
+Этот файл объясняет различные опции запуска для пакета PiDrone.
 
-## Communication with the Flight Controller
+## Обновление: Совмещенная функциональность
 
-The PiDrone package has two different nodes that can communicate with the flight controller board:
+В последней версии пакета `msp_offboard.py` был модифицирован, чтобы включить всю функциональность из `flight_controller_node.py`. Теперь достаточно запустить только узел `msp_offboard`, чтобы получить все возможности:
+- Коммуникацию с полетным контроллером
+- Публикацию IMU данных
+- Мониторинг heartbeat других узлов
+- Расширенные функции управления позицией и скоростью
 
-1. `flight_controller_node.py` - The original node that communicates with the flight controller, reads IMU data, and sends basic control commands.
-2. `msp_offboard.py` - A more advanced control node that provides position control, velocity control, and other features.
-
-## Launch Options
-
-### 1. Using the flight_controller_node.py only
-
-```bash
-roslaunch pidrone_pkg flight_controller_only.launch
-```
-
-This launches the basic flight controller node without the MSP Offboard functionality.
-
-### 2. Using the msp_offboard.py only
+## Рекомендуемый вариант запуска
 
 ```bash
 roslaunch pidrone_pkg msp_offboard_only.launch
 ```
 
-This launches the MSP Offboard node for advanced control without the standard flight controller node.
+Это запустит обновленную версию MSP Offboard с полной функциональностью.
 
-### 3. Original launch (PROBLEMATIC - DO NOT USE!)
+## Устаревшие варианты запуска (НЕ РЕКОМЕНДУЮТСЯ)
+
+### 1. Использование только flight_controller_node.py
+
+```bash
+roslaunch pidrone_pkg flight_controller_only.launch
+```
+
+⚠️ Не рекомендуется, так как не обеспечивает полную функциональность.
+
+### 2. Оригинальный запуск (ПРОБЛЕМНЫЙ - НЕ ИСПОЛЬЗОВАТЬ!)
 
 ```bash
 roslaunch pidrone_pkg msp_offboard.launch
 ```
 
-⚠️ **WARNING**: This launch file attempts to start both `flight_controller_node.py` and `msp_offboard.py`, which will cause errors because both try to connect to the same serial port. You will see "Didn't get valid header" errors and other communication failures.
+⚠️ **ВНИМАНИЕ**: Этот файл запуска пытается запустить одновременно `flight_controller_node.py` и `msp_offboard.py`, что приведет к ошибкам из-за конфликта доступа к одному и тому же последовательному порту.
 
-## Troubleshooting
+## Устранение неполадок
 
-If you see errors like these:
+Если вы видите ошибки типа:
 ```
 "Didn't get valid header: "
 "Failed to get data after 3 attempts"
 "Exception in receiveDataPacket: device reports readiness to read but returned no data (device disconnected or multiple access on port?)"
 ```
 
-It means multiple nodes are trying to connect to the same serial port. Use one of the first two launch options above instead.
+Это означает, что несколько узлов пытаются подключиться к одному последовательному порту. Используйте только `msp_offboard_only.launch`.
 
-## Choosing Which Mode to Use
+## Преимущества обновленной версии
 
-- Use `flight_controller_only.launch` for basic manual control and testing.
-- Use `msp_offboard_only.launch` for advanced features like position control, waypoint navigation, etc. 
+- Объединенный код устраняет конфликты доступа к последовательному порту
+- Более чистая архитектура с одним узлом для связи с полетным контроллером
+- Сохранение всех возможностей обоих узлов в одном
+- Улучшенная стабильность системы 

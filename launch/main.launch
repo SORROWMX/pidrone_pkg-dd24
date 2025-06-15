@@ -1,0 +1,4 @@
+<launch>
+    <!-- Запуск основных компонентов через обновленный файл -->
+    <include file="$(find pidrone_pkg)/launch/msp_offboard_only.launch" />
+</launch> 

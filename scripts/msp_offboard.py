@@ -130,7 +130,6 @@ class MSPOffboard:
         rospy.Subscriber("/pidrone/heartbeat/web_interface", Empty, self.heartbeat_web_interface_callback)
         rospy.Subscriber("/pidrone/heartbeat/pid_controller", Empty, self.heartbeat_pid_controller_callback)
         rospy.Subscriber("/pidrone/state", State, self.heartbeat_state_estimator_callback)
-        # Range уже подписан, дополняем его функцией heartbeat
         
         rospy.loginfo("MSP Offboard initialized")
     
@@ -302,7 +301,7 @@ class MSPOffboard:
     def heartbeat_timer_callback(self, event):
         """Send heartbeat signal"""
         self.heartbeat_pub.publish(Empty())
-        # Проверяем состояние heartbeat от других узлов
+        # Check heartbeat status from other nodes
         self.check_safety()
     
     def check_safety(self):
@@ -312,31 +311,30 @@ class MSPOffboard:
         curr_time = rospy.Time.now()
         need_disarm = False
         
-        # Проверка heartbeat от pid_controller
+        # Check heartbeat from pid_controller
         if hasattr(self, 'heartbeat_pid_controller') and curr_time - self.heartbeat_pid_controller > rospy.Duration.from_sec(1):
             rospy.logwarn('Safety Failure: not receiving flight commands. Check the pid_controller node')
             need_disarm = True
             
-        # Проверка heartbeat от infrared
+        # Check heartbeat from infrared
         if hasattr(self, 'heartbeat_infrared') and curr_time - self.heartbeat_infrared > rospy.Duration.from_sec(1):
             rospy.logwarn('Safety Failure: not receiving data from the IR sensor. Check the infrared node')
             need_disarm = True
             
-        # Предупреждение о высокой высоте
+        # Warning for high altitude
         if hasattr(self, 'current_height') and self.current_height > 0.5:
             rospy.logwarn('Warning: High altitude detected: {}m'.format(self.current_height))
             
-        # Проверка heartbeat от state_estimator
+        # Check heartbeat from state_estimator
         if hasattr(self, 'heartbeat_state_estimator') and curr_time - self.heartbeat_state_estimator > rospy.Duration.from_sec(1):
             rospy.logwarn('Safety Failure: not receiving a state estimate. Check the state_estimator node')
             need_disarm = True
             
-        # Если обнаружены проблемы с безопасностью, выполнить аварийное дизармирование
+        # If safety issues detected, perform emergency disarm
         if need_disarm and self.armed:
             rospy.logerr("Safety check failed! Emergency disarming.")
             self.disarm()
     
-    # Callbacks для heartbeat других узлов
     def heartbeat_web_interface_callback(self, msg):
         """Update web_interface heartbeat"""
         self.heartbeat_web_interface = rospy.Time.now()
