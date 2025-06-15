@@ -110,10 +110,10 @@ class PID:
     def __init__(self):
         """Initialize the PID controller with default values"""
         # Improved settings for height control with better damping
-        self.throttle = PIDaxis(0.4,  # Reduced P component for smoother response
-                               0.2,   # Reduced I component to prevent overshoot
-                               0.6,   # Increased D component for better damping
-                               i_range=(-150, 150), control_range=(1200, 1450),
+        self.throttle = PIDaxis(0.4,  # P component
+                               0.2,   # I component
+                               0.6,   # D component
+                               i_range=(-150, 150), control_range=(1100, 1400),
                                d_range=(-50, 50), midpoint=1350, d_filter_size=15)
 
         # Roll PID controllers (low and high rates)

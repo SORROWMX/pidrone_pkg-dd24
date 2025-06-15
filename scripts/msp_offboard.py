@@ -376,13 +376,13 @@ class MSPOffboard:
         # Convert errors to RC commands (1000-2000)
         roll_cmd = 1500 + int(kp_xy * pos_error_x)
         pitch_cmd = 1500 + int(kp_xy * pos_error_y)
-        throttle_cmd = 1500 + int(kp_z * pos_error_z)
+        throttle_cmd = 1000 + int(kp_z * pos_error_z)
         yaw_cmd = 1500  # Not using yaw control for now
         
         # Limit commands
         roll_cmd = max(min(roll_cmd, 1700), 1300)
         pitch_cmd = max(min(pitch_cmd, 1700), 1300)
-        throttle_cmd = max(min(throttle_cmd, 1700), 1300)
+        throttle_cmd = max(min(throttle_cmd, 1400), 1100)
         
         # Update command in order [roll, pitch, throttle, yaw] to match AETR map in INAV
         self.current_command = [roll_cmd, pitch_cmd, throttle_cmd, yaw_cmd, 1900, 1000, 1000, 1000]
@@ -396,13 +396,13 @@ class MSPOffboard:
         # Convert velocities to RC commands (1000-2000)
         roll_cmd = 1500 + int(kv_xy * self.target_velocity['x'])
         pitch_cmd = 1500 + int(kv_xy * self.target_velocity['y'])
-        throttle_cmd = 1500 + int(kv_z * self.target_velocity['z'])
+        throttle_cmd = 1000 + int(kv_z * self.target_velocity['z'])
         yaw_cmd = 1500 + int(self.target_yaw * 100)  # Coefficient for angular velocity
         
         # Limit commands
         roll_cmd = max(min(roll_cmd, 1700), 1300)
         pitch_cmd = max(min(pitch_cmd, 1700), 1300)
-        throttle_cmd = max(min(throttle_cmd, 1700), 1300)
+        throttle_cmd = max(min(throttle_cmd, 1400), 1100)
         yaw_cmd = max(min(yaw_cmd, 1700), 1300)
         
         # Update command in order [roll, pitch, throttle, yaw] to match AETR map in INAV
@@ -452,7 +452,7 @@ class MSPOffboard:
         return True
     
     def takeoff(self, req):
-        """Takeoff to specified height"""
+        """Takeoff to specified height with stability measures"""
         if self.flying:
             return TriggerResponse(success=False, message="Drone is already flying")
         
@@ -460,109 +460,80 @@ class MSPOffboard:
         if not self.armed:
             self.arm()
         
-        # Switch to flight mode
+        # Switch to flight mode but initially WITHOUT position control
         mode_msg = Mode()
         mode_msg.mode = "FLYING"
         self.mode_pub.publish(mode_msg)
         
-        # Switch to position control
-        self.position_control_pub.publish(Bool(True))
+        # Initially disable position control during takeoff
+        self.position_control_pub.publish(Bool(False))
         
-        # Set target height and control mode
-        with self.state_lock:
-            self.target_position['z'] = self.default_takeoff_height
-            self.control_mode = 'position'
-            self.flying = True
+        # Set target height
+        target_height = 0.5  # meters
         
-        # Start smooth takeoff in separate thread
-        Thread(target=self._smooth_takeoff).start()
+        # Start controlled takeoff in separate thread
+        Thread(target=self._controlled_takeoff, args=(target_height,)).start()
         
         return TriggerResponse(success=True, message="Takeoff started")
-    
-    def _smooth_takeoff(self):
-        """Smooth takeoff with stabilization check at each step"""
-        initial_height = 0.05
-        target_height = self.default_takeoff_height
+
+    def _controlled_takeoff(self, target_height):
+        """Controlled takeoff with optical flow stability measures"""
+        # Initial phase - just gain altitude with rate control
+        initial_height = 0.15  # Get to this height before enabling position hold
+        
+        # 1. First phase - climb to initial height with throttle-only control
+        rospy.loginfo("Phase 1: Climbing to initial height %.2fm", initial_height)
+        
+        # Start with a conservative throttle value
+        throttle_cmd = 1450  # Start with moderate throttle
+        
+        with self.command_lock:
+            # Send neutral commands for roll/pitch/yaw with initial throttle
+            self.current_command = [1500, 1500, throttle_cmd, 1500, 1900, 1000, 1000, 1000]
+        
+        # Wait until we reach minimum height
+        while self.current_height < initial_height:
+            if not self.armed or not self.flying:
+                rospy.logwarn("Takeoff aborted")
+                return
+            
+            rospy.sleep(0.1)
+        
+        # 2. Stabilize at initial height
+        rospy.loginfo("Phase 2: Stabilizing at initial height")
+        rospy.sleep(2.0)  # Allow time to stabilize
+        
+        # 3. Enable position control now that we're stable
+        rospy.loginfo("Phase 3: Enabling position control")
+        with self.state_lock:
+            # Lock current position as reference
+            self.target_position['x'] = self.current_position['x']
+            self.target_position['y'] = self.current_position['y']
+            self.target_position['z'] = initial_height
+            self.control_mode = 'position'
+        
+        self.position_control_pub.publish(Bool(True))
+        
+        # Wait for position control to stabilize
+        rospy.sleep(3.0)
+        
+        # 4. Now climb to target height with position control active
+        rospy.loginfo("Phase 4: Climbing to target height %.2fm", target_height)
+        
+        # Gradually increase height
         steps = 10
         height_step = (target_height - initial_height) / steps
         
-        # Start with minimum height
-        with self.state_lock:
-            self.target_position['z'] = initial_height
-        
-        rospy.loginfo("Starting takeoff. Target height: {0} m".format(target_height))
-        
-        # Gradually increase height
         for i in range(1, steps + 1):
             current_target = initial_height + height_step * i
             
             with self.state_lock:
                 self.target_position['z'] = current_target
             
-            rospy.loginfo("Takeoff step {0}/{1}: height {2:.2f} m".format(i, steps, current_target))
-            
-            # Wait for height to be reached
-            stable_count = 0
-            timeout_count = 0
-            max_timeout = 50  # Max 5 seconds for stabilization
-            
-            # Adaptive height stabilization logic
-            while stable_count < 5 and timeout_count < max_timeout:
-                with self.state_lock:
-                    current_height = self.current_height
-                    height_error = self.target_position['z'] - current_height
-                
-                # Check if drone is too high
-                if current_height > 0.6:  # If drone is too high
-                    rospy.logwarn("Height too high ({:.2f}m), adjusting target down".format(current_height))
-                    # Decrease target height instead of disarming
-                    with self.state_lock:
-                        self.target_position['z'] = current_height - 0.1  # Reduce by 10 cm
-                    # Reset timeout
-                    timeout_count = 0
-                    # Reset stability counter
-                    stable_count = 0
-                
-                # Check if target height is reached
-                if abs(height_error) < self.height_tolerance:
-                    stable_count += 1
-                else:
-                    stable_count = 0
-                    
-                    # Adaptive correction when having difficulty reaching height
-                    if timeout_count > 30:  # If we've been trying for too long
-                        if height_error > 0:  # If we can't reach higher altitude
-                            # Decrease target height
-                            adjusted_target = current_height + height_error * 0.5
-                            rospy.logwarn("Difficulty reaching height {:.2f}m, adjusting to {:.2f}m".format(
-                                self.target_position['z'], adjusted_target))
-                            with self.state_lock:
-                                self.target_position['z'] = adjusted_target
-                        else:  # If we can't descend to lower altitude
-                            # Increase target height
-                            adjusted_target = current_height + height_error * 0.5
-                            rospy.logwarn("Difficulty descending to {:.2f}m, adjusting to {:.2f}m".format(
-                                self.target_position['z'], adjusted_target))
-                            with self.state_lock:
-                                self.target_position['z'] = adjusted_target
-                        
-                        # Reset timeout after adjustment
-                        timeout_count = 0
-                
-                timeout_count += 1
-                rospy.sleep(0.1)
-            
-            if timeout_count >= max_timeout:
-                rospy.logwarn("Timeout reaching height {0:.2f} m, continuing with current height {1:.2f} m".format(
-                    current_target, self.current_height))
+            rospy.loginfo("Climbing step %d/%d: height %.2fm", i, steps, current_target)
+            rospy.sleep(0.5)
         
-        # Final stabilization at reached height
-        with self.state_lock:
-            actual_height = self.current_height
-            # Set actual reached height as target
-            self.target_position['z'] = actual_height
-        
-        rospy.loginfo("Takeoff complete. Stabilized at height: {0:.2f} m".format(actual_height))
+        rospy.loginfo("Takeoff complete. Stabilized at height: %.2fm", target_height)
     
     def land(self, req):
         """Land the drone"""

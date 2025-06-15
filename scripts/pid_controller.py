@@ -106,6 +106,12 @@ class PIDController(object):
         # accomplished by calculate_travel_time
         self.path_planning = True
 
+        # For more stable height control during takeoff
+        self.throttle = PIDaxis(0.35,  # Slightly reduced P for smoother response
+                                0.15,   # Reduced I to prevent overshoot
+                                0.7,    # Increased D for better damping
+                                i_range=(-150, 150), control_range=(1200, 1450),
+                                d_range=(-50, 50), midpoint=1350, d_filter_size=15)
 
     # ROS SUBSCRIBER CALLBACK METHODS
     #################################
