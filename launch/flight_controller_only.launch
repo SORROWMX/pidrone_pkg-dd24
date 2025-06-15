@@ -1,0 +1,18 @@
+<launch>
+    <!-- Запуск базовых компонентов -->
+    <include file="$(find pidrone_pkg)/launch/tof.launch" />
+    <include file="$(find pidrone_pkg)/launch/raspicam_node.launch" />
+    
+    <!-- Запуск модифицированных узлов в следующем порядке -->
+    <node name="state_estimator" pkg="pidrone_pkg" type="state_estimator.py" args="-p ukf7d" output="screen" />
+    <node name="pid_controller" pkg="pidrone_pkg" type="pid_controller.py" output="screen" />
+    <node name="optical_flow_node" pkg="pidrone_pkg" type="optical_flow_node.py" output="screen" />
+    <node name="rigid_transform_node" pkg="pidrone_pkg" type="rigid_transform_node.py" output="screen" />
+    
+    <!-- Запуск веб-интерфейса -->
+    <node name="rosbridge_server" pkg="rosbridge_server" type="rosbridge_websocket" output="screen" />
+    <node name="web_video_server" pkg="web_video_server" type="web_video_server" output="screen" />
+    
+    <!-- Запуск только flight_controller_node -->
+    <node name="flight_controller_node" pkg="pidrone_pkg" type="flight_controller_node.py" output="screen" />
+</launch> 

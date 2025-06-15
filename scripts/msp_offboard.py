@@ -11,8 +11,8 @@ from h2rMultiWii import MultiWii
 from serial import SerialException
 from std_msgs.msg import Empty, Bool, Float32
 from std_srvs.srv import Trigger, TriggerResponse
-from sensor_msgs.msg import Range
-from geometry_msgs.msg import PoseStamped, TwistStamped, Vector3Stamped
+from sensor_msgs.msg import Range, Imu
+from geometry_msgs.msg import PoseStamped, TwistStamped, Vector3Stamped, Quaternion
 from pidrone_pkg.msg import Mode, RC, State
 
 import command_values as cmds
@@ -67,6 +67,30 @@ class MSPOffboard:
         # Timers
         self.command_timer = None
         self.telemetry_timer = None
+        self.time = rospy.Time.now()
+        
+        # Initialize the Imu Message
+        ############################
+        header = rospy.Header()
+        header.frame_id = 'Body'
+        header.stamp = rospy.Time.now()
+        
+        self.imu_message = Imu()
+        self.imu_message.header = header
+        
+        # Accelerometer parameters
+        ##########################
+        import rospkg
+        import yaml
+        rospack = rospkg.RosPack()
+        path = rospack.get_path('pidrone_pkg')
+        with open("%s/params/multiwii.yaml" % path) as f:
+            means = yaml.load(f)
+        
+        self.accRawToMss = 9.8 / means["az"]
+        self.accZeroX = means["ax"] * self.accRawToMss
+        self.accZeroY = means["ay"] * self.accRawToMss
+        self.accZeroZ = means["az"] * self.accRawToMss
         
         # Topic subscriptions
         rospy.Subscriber('/pidrone/range', Range, self.range_callback)
@@ -79,6 +103,7 @@ class MSPOffboard:
         self.position_control_pub = rospy.Publisher('/pidrone/position_control', Bool, queue_size=1)
         self.heartbeat_pub = rospy.Publisher('/pidrone/heartbeat/msp_offboard', Empty, queue_size=1)
         self.height_stable_pub = rospy.Publisher('/pidrone/height_stable', Bool, queue_size=1)
+        self.imu_pub = rospy.Publisher('/pidrone/imu', Imu, queue_size=1, tcp_nodelay=False)
         
         # Services
         rospy.Service('/pidrone/msp_offboard/takeoff', Trigger, self.takeoff)
@@ -92,6 +117,20 @@ class MSPOffboard:
         self.command_timer = rospy.Timer(rospy.Duration(0.05), self.command_timer_callback)
         self.telemetry_timer = rospy.Timer(rospy.Duration(0.1), self.telemetry_timer_callback)
         self.heartbeat_timer = rospy.Timer(rospy.Duration(1.0), self.heartbeat_timer_callback)
+        self.imu_timer = rospy.Timer(rospy.Duration(0.02), self.imu_timer_callback)  # 50Hz IMU updates
+        
+        # Heartbeat monitoring
+        curr_time = rospy.Time.now()
+        self.heartbeat_infrared = curr_time
+        self.heartbeat_web_interface = curr_time
+        self.heartbeat_pid_controller = curr_time
+        self.heartbeat_state_estimator = curr_time
+        
+        # Additional heartbeat subscribers
+        rospy.Subscriber("/pidrone/heartbeat/web_interface", Empty, self.heartbeat_web_interface_callback)
+        rospy.Subscriber("/pidrone/heartbeat/pid_controller", Empty, self.heartbeat_pid_controller_callback)
+        rospy.Subscriber("/pidrone/state", State, self.heartbeat_state_estimator_callback)
+        # Range уже подписан, дополняем его функцией heartbeat
         
         rospy.loginfo("MSP Offboard initialized")
     
@@ -100,6 +139,9 @@ class MSPOffboard:
         with self.state_lock:
             self.current_height = msg.range
             self.current_position['z'] = msg.range
+        
+        # Update heartbeat for IR sensor
+        self.heartbeat_infrared = rospy.Time.now()
     
     def state_callback(self, msg):
         """Handler for drone state data"""
@@ -120,6 +162,109 @@ class MSPOffboard:
             if abs(msg.twist.linear.x) < 1.0 and abs(msg.twist.linear.y) < 1.0:
                 self.current_velocity['x'] = msg.twist.linear.x
                 self.current_velocity['y'] = msg.twist.linear.y
+    
+    def near_zero(self, n):
+        """ Set a number to zero if it is below a threshold value """
+        return 0 if abs(n) < 0.0001 else n
+    
+    def update_imu_message(self):
+        """
+        Compute the ROS IMU message by reading data from the board.
+        """
+        try:
+            # extract roll, pitch, heading
+            attitude_data = self.board.getData(MultiWii.ATTITUDE)
+            # extract lin_acc_x, lin_acc_y, lin_acc_z
+            imu_data = self.board.getData(MultiWii.RAW_IMU)
+
+            # If no data received, skip this update
+            if attitude_data is None or imu_data is None:
+                rospy.logwarn("Failed to get IMU data, skipping update")
+                return False
+
+            # calculate values to update imu_message:
+            roll = np.deg2rad(self.board.attitude['angx'])
+            pitch = -np.deg2rad(self.board.attitude['angy'])
+            heading = np.deg2rad(self.board.attitude['heading'])
+            # Note that at pitch angles near 90 degrees, the roll angle reading can
+            # fluctuate a lot
+            # transform heading (similar to yaw) to standard math conventions, which
+            # means angles are in radians and positive rotation is CCW
+            heading = (-heading) % (2 * np.pi)
+            # When first powered up, heading should read near 0
+            # get the previous roll, pitch, heading values
+            previous_quaternion = self.imu_message.orientation
+            quaternion_array = [previous_quaternion.x, previous_quaternion.y, previous_quaternion.z, previous_quaternion.w]
+            previous_roll, previous_pitch, previous_heading = tf.transformations.euler_from_quaternion(quaternion_array)
+
+            # Although quaternion_from_euler takes a heading in range [0, 2pi),
+            # euler_from_quaternion returns a heading in range [0, pi] or [0, -pi).
+            # Thus need to convert the returned heading back into the range [0, 2pi).
+            previous_heading = previous_heading % (2 * np.pi)
+
+            # transform euler angles into quaternion
+            quaternion = tf.transformations.quaternion_from_euler(roll, pitch, heading)
+            # calculate the linear accelerations
+            lin_acc_x = self.board.rawIMU['ax'] * self.accRawToMss - self.accZeroX
+            lin_acc_y = self.board.rawIMU['ay'] * self.accRawToMss - self.accZeroY
+            lin_acc_z = self.board.rawIMU['az'] * self.accRawToMss - self.accZeroZ
+
+            # Rotate the IMU frame to align with our convention for the drone's body
+            # frame. IMU: x is forward, y is left, z is up. We want: x is right,
+            # y is forward, z is up.
+            lin_acc_x_drone_body = -lin_acc_y
+            lin_acc_y_drone_body = lin_acc_x
+            lin_acc_z_drone_body = lin_acc_z
+
+            # Account for gravity's affect on linear acceleration values when roll
+            # and pitch are nonzero. When the drone is pitched at 90 degrees, for
+            # example, the z acceleration reads out as -9.8 m/s^2. This makes sense,
+            # as the IMU, when powered up / when the calibration script is called,
+            # zeros the body-frame z-axis acceleration to 0, but when it's pitched
+            # 90 degrees, the body-frame z-axis is perpendicular to the force of
+            # gravity, so, as if the drone were in free-fall (which was roughly
+            # confirmed experimentally), the IMU reads -9.8 m/s^2 along the z-axis.
+            g = 9.8
+            lin_acc_x_drone_body = lin_acc_x_drone_body + g*np.sin(roll)*np.cos(pitch)
+            lin_acc_y_drone_body = lin_acc_y_drone_body + g*np.cos(roll)*(-np.sin(pitch))
+            lin_acc_z_drone_body = lin_acc_z_drone_body + g*(1 - np.cos(roll)*np.cos(pitch))
+
+            # calculate the angular velocities of roll, pitch, and yaw in rad/s
+            time = rospy.Time.now()
+            dt = time.to_sec() - self.time.to_sec()
+            dr = roll - previous_roll
+            dp = pitch - previous_pitch
+            dh = heading - previous_heading
+            angvx = self.near_zero(dr / dt)
+            angvy = self.near_zero(dp / dt)
+            angvz = self.near_zero(dh / dt)
+            self.time = time
+
+            # Update the imu_message:
+            # header stamp
+            self.imu_message.header.stamp = time
+            # orientation
+            self.imu_message.orientation.x = quaternion[0]
+            self.imu_message.orientation.y = quaternion[1]
+            self.imu_message.orientation.z = quaternion[2]
+            self.imu_message.orientation.w = quaternion[3]
+            # angular velocities
+            self.imu_message.angular_velocity.x = angvx
+            self.imu_message.angular_velocity.y = angvy
+            self.imu_message.angular_velocity.z = angvz
+            # linear accelerations
+            self.imu_message.linear_acceleration.x = lin_acc_x_drone_body
+            self.imu_message.linear_acceleration.y = lin_acc_y_drone_body
+            self.imu_message.linear_acceleration.z = lin_acc_z_drone_body
+            return True
+        except Exception as e:
+            rospy.logerr("Error updating IMU message: {}".format(e))
+            return False
+    
+    def imu_timer_callback(self, event):
+        """Timer callback for updating and publishing IMU data"""
+        if self.update_imu_message():
+            self.imu_pub.publish(self.imu_message)
     
     def command_timer_callback(self, event):
         """Send commands to flight controller"""
@@ -157,6 +302,52 @@ class MSPOffboard:
     def heartbeat_timer_callback(self, event):
         """Send heartbeat signal"""
         self.heartbeat_pub.publish(Empty())
+        # Проверяем состояние heartbeat от других узлов
+        self.check_safety()
+    
+    def check_safety(self):
+        """
+        Check for missing heartbeats and issue warning for high altitude
+        """
+        curr_time = rospy.Time.now()
+        need_disarm = False
+        
+        # Проверка heartbeat от pid_controller
+        if hasattr(self, 'heartbeat_pid_controller') and curr_time - self.heartbeat_pid_controller > rospy.Duration.from_sec(1):
+            rospy.logwarn('Safety Failure: not receiving flight commands. Check the pid_controller node')
+            need_disarm = True
+            
+        # Проверка heartbeat от infrared
+        if hasattr(self, 'heartbeat_infrared') and curr_time - self.heartbeat_infrared > rospy.Duration.from_sec(1):
+            rospy.logwarn('Safety Failure: not receiving data from the IR sensor. Check the infrared node')
+            need_disarm = True
+            
+        # Предупреждение о высокой высоте
+        if hasattr(self, 'current_height') and self.current_height > 0.5:
+            rospy.logwarn('Warning: High altitude detected: {}m'.format(self.current_height))
+            
+        # Проверка heartbeat от state_estimator
+        if hasattr(self, 'heartbeat_state_estimator') and curr_time - self.heartbeat_state_estimator > rospy.Duration.from_sec(1):
+            rospy.logwarn('Safety Failure: not receiving a state estimate. Check the state_estimator node')
+            need_disarm = True
+            
+        # Если обнаружены проблемы с безопасностью, выполнить аварийное дизармирование
+        if need_disarm and self.armed:
+            rospy.logerr("Safety check failed! Emergency disarming.")
+            self.disarm()
+    
+    # Callbacks для heartbeat других узлов
+    def heartbeat_web_interface_callback(self, msg):
+        """Update web_interface heartbeat"""
+        self.heartbeat_web_interface = rospy.Time.now()
+
+    def heartbeat_pid_controller_callback(self, msg):
+        """Update pid_controller heartbeat"""
+        self.heartbeat_pid_controller = rospy.Time.now()
+
+    def heartbeat_state_estimator_callback(self, msg):
+        """Update state_estimator heartbeat"""
+        self.heartbeat_state_estimator = rospy.Time.now()
     
     def update_command(self):
         """Update command based on target position/velocity"""
