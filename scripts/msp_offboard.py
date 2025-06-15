@@ -140,15 +140,19 @@ class MSPOffboard:
         """Get telemetry from flight controller"""
         try:
             # Get orientation data
-            self.board.getData(MultiWii.ATTITUDE)
+            attitude_data = self.board.getData(MultiWii.ATTITUDE)
+            
+            if attitude_data is None:
+                rospy.logwarn("Failed to get attitude data")
+                return
             
             # Check height stability
             if self.flying:
                 height_error = abs(self.target_position['z'] - self.current_height)
                 is_stable = height_error < self.height_tolerance
                 self.height_stable_pub.publish(Bool(is_stable))
-        except:
-            rospy.logwarn("Error getting telemetry")
+        except Exception as e:
+            rospy.logwarn("Error getting telemetry: %s", str(e))
     
     def heartbeat_timer_callback(self, event):
         """Send heartbeat signal"""

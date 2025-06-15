@@ -196,8 +196,41 @@ class MultiWii:
 
     """Function to receive a data packet from the board"""
     def getData(self, cmd):
-        self.send_raw_command(0,cmd,[])
-        return self.receiveDataPacket()
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                self.send_raw_command(0, cmd, [])
+                result = self.receiveDataPacket()
+                
+                if result is not None:
+                    return result
+                
+                # Если результат None, но это не последняя попытка
+                if retry < max_retries - 1:
+                    print(f"Failed to get data on attempt {retry+1}, retrying...")
+                    # Пауза перед следующей попыткой
+                    time.sleep(0.05)
+                    # Очистка буферов
+                    try:
+                        self.ser.reset_input_buffer()
+                        self.ser.reset_output_buffer()
+                    except:
+                        try:
+                            self.ser.flushInput()
+                            self.ser.flushOutput()
+                        except:
+                            pass
+            except Exception as e:
+                print(f"Error in getData: {e}")
+                if retry < max_retries - 1:
+                    time.sleep(0.05)
+                else:
+                    # Если это последняя попытка, возвращаем None
+                    return None
+        
+        # Если все попытки не удались
+        print(f"Failed to get data after {max_retries} attempts")
+        return None
 
     """ Sends a request for N commands from the board. """
     def getDataBulk(self, cmds):
@@ -210,176 +243,257 @@ class MultiWii:
 
     def receiveDataPacket(self):
         with self.serial_port_read_lock:
-            start = time.time()
-
-            header = self.ser.read(5)
-            if len(header) == 0:
-                print("timeout on receiveDataPacket")
-                return None
-            elif header[0] != '$':
-                print("Didn't get valid header: ", header)
-                raise ValueError("Invalid header format")
-
-            datalength = MultiWii.codeS.unpack(header[-2])[0]
-            code = MultiWii.codeS.unpack(header[-1])[0]
-            data = self.ser.read(datalength)
-            checksum = self.ser.read()
-            self.checkChecksum(data, checksum)  # noop now.
-            readTime = time.time()
-            elapsed = readTime - start
-            if code == MultiWii.ATTITUDE:
-                temp = MultiWii.ATTITUDE_STRUCT.unpack(data)
-                self.attitude['cmd'] = code
-                self.attitude['angx']= temp[0]/10.0
-                self.attitude['angy']= temp[1]/10.0
-                self.attitude['heading']= temp[2]
-                self.attitude['elapsed']= elapsed
-                self.attitude['timestamp']= readTime
-                return self.attitude
-            elif code == MultiWii.BOXIDS:
-                temp = struct.unpack('<'+'b'*datalength,data)
-                self.boxids = temp
-                return self.boxids
-            elif code == MultiWii.SET_BOX:
-                print("data", data)
-                print("len", len(data))
-            elif code == MultiWii.BOX:
-                assert datalength % 2 == 0
-                temp = struct.unpack('<'+'H'*(datalength/2), data)
-                self.box = temp
-                return self.box
-            elif code == MultiWii.ANALOG:
-                temp = struct.unpack('<'+'B2HhH', data)
-                self.analog['vbat'] = temp[0]
-                self.analog['intPowerMeterSum'] = temp[1]
-                self.analog['rssi'] = temp[2]
-                self.analog['amperage'] = temp[3]
-                self.analog['timestamp']= readTime
-                return self.analog
-            elif code == MultiWii.BOXNAMES:
-                print("datalength", datalength)
-                assert datalength % 2 == 0
-                temp = struct.unpack('<'+'s' * datalength, data)
-                temp = "".join(temp)[:-1].split(";")
-                self.boxnames = temp
-                return self.boxnames
-            elif code == MultiWii.STATUS:
-                print(data)
-                temp = struct.unpack('<'+'HHHIb',data)
-                self.status['cycleTime'] = temp[0]
-                self.status['i2c_errors_count'] = temp[1]
-                self.status['sensor'] = temp[2]
-                self.status['flag'] = temp[3]
-                self.status['global_conf.currentSet'] = temp[4]
-                self.status['timestamp']= readTime
-                return self.status
-            elif code == MultiWii.ACC_CALIBRATION:
-                print("data", data)
-                print("len", len(data))
-
-            elif code == MultiWii.IDENT:
-                temp = struct.unpack('<'+'BBBI',data)
-                self.ident["cmd"] = code
-                self.ident["version"] = temp[0]
-                self.ident["multitype"] = temp[1]
-                self.ident["msp_version"] = temp[2]
-                self.ident["capability"] = temp[3]
-                self.ident['timestamp']= readTime
-
-                return self.ident
-            elif code == MultiWii.RC:
-                # Handle different RC channel data lengths
-                num_channels = datalength // 2  # Each channel is 2 bytes
-                format_string = '<' + 'h' * num_channels
-                
-                try:
-                    temp = struct.unpack(format_string, data)
-                    self.rcChannels['cmd'] = code
-                    
-                    # Always set the basic channels
-                    if num_channels >= 1:
-                        self.rcChannels['roll'] = temp[0]
-                    if num_channels >= 2:
-                        self.rcChannels['pitch'] = temp[1]
-                    if num_channels >= 3:
-                        self.rcChannels['yaw'] = temp[2]
-                    if num_channels >= 4:
-                        self.rcChannels['throttle'] = temp[3]
-                    
-                    # Set auxiliary channels if available
-                    aux_channels = min(num_channels - 4, 8)  # Up to 8 aux channels
-                    for i in range(aux_channels):
-                        self.rcChannels['aux' + str(i+1)] = temp[i+4]
-                    
-                    # Clear any remaining aux channels that weren't in the data
-                    for i in range(aux_channels, 8):
-                        if 'aux' + str(i+1) in self.rcChannels:
-                            self.rcChannels['aux' + str(i+1)] = 0
-                    
-                    self.rcChannels['elapsed'] = elapsed
-                    self.rcChannels['timestamp'] = readTime
-                    
-                    print("Received RC data with %d channels" % num_channels)
-                    return self.rcChannels
-                except struct.error as e:
-                    print("Error unpacking RC data: %s" % e)
-                    print("Data length: %d, Expected format: %s" % (datalength, format_string))
-                    print("Raw data: %s" % data)
-                    return None
-
-            elif code == MultiWii.PID:
-                temp = MultiWii.PID_STRUCT.unpack(data)
-                self.pid['roll']   = PID(temp[0], temp[1], temp[2])
-                self.pid['pitch']  = PID(temp[3], temp[4], temp[5])
-                self.pid['yaw']    = PID(temp[6], temp[7], temp[8])
-                self.pid['alt']    = PID(temp[9], temp[10], temp[11])
-                self.pid['pos']    = PID(temp[12], temp[13], temp[14])
-                self.pid['posr']   = PID(temp[15], temp[16], temp[17])
-                self.pid['navr']   = PID(temp[18], temp[19], temp[20])
-                self.pid['level']  = PID(temp[21], temp[22], temp[23])
-                self.pid['mag']    = PID(temp[24], temp[25], temp[26])
-                self.pid['vel']    = PID(temp[27], temp[28], temp[29])
-                print(self.pid)
+            max_attempts = 3  # Максимальное количество попыток чтения заголовка
             
-            elif code == MultiWii.RAW_IMU:
-                temp = MultiWii.RAW_IMU_STRUCT.unpack(data)
-                self.rawIMU['cmd'] = code
-                self.rawIMU['ax']=temp[0]
-                self.rawIMU['ay']=temp[1]
-                self.rawIMU['az']=temp[2]
-                self.rawIMU['gx']=temp[3]
-                self.rawIMU['gy']=temp[4]
-                self.rawIMU['gz']=temp[5]
-                self.rawIMU['timestamp']= readTime
-                return self.rawIMU
-            elif code == MultiWii.POS_EST:
-                temp = struct.unpack('<'+'hhh',data)
-                self.posest["cmd"] = code
-                self.posest['x']=float(temp[0])
-                self.posest['y']=float(temp[1])
-                self.posest['z']=float(temp[2])
-                self.posest['elapsed']=elapsed
-                self.posest['timestamp']=time.time()
-                return self.posest
-            elif code == MultiWii.MOTOR:
-                temp = struct.unpack('<'+'hhhhhhhh',data)
-                self.motor['cmd'] = code
-                self.motor['m1']=float(temp[0])
-                self.motor['m2']=float(temp[1])
-                self.motor['m3']=float(temp[2])
-                self.motor['m4']=float(temp[3])
-                self.motor['m5']=float(temp[4])
-                self.motor['m6']=float(temp[5])
-                self.motor['m7']=float(temp[6])
-                self.motor['m8']=float(temp[7])
-                self.motor['elapsed']= elapsed
-                self.motor['timestamp']= readTime
-                return self.motor
-            elif code == MultiWii.SET_RAW_RC:
-                return "Set Raw RC"
-            else:
-                print("No return error!: %d" % code)
-                raise ValueError("Unsupported code: {}".format(code))
+            for attempt in range(max_attempts):
+                try:
+                    # Начинаем отсчет времени для замера длительности операции
+                    start = time.time()
+                    
+                    # Попытка считать заголовок (5 байт)
+                    header = self.ser.read(5)
+                    
+                    # Проверка тайм-аута (ничего не получено)
+                    if len(header) == 0:
+                        if attempt == max_attempts - 1:
+                            print("Timeout on receiveDataPacket after %d attempts" % max_attempts)
+                            return None
+                        print("Timeout on attempt %d, retrying..." % (attempt + 1))
+                        continue
+                    
+                    # Проверка неполного заголовка
+                    if len(header) < 5:
+                        if attempt == max_attempts - 1:
+                            print("Incomplete header read, got only %d bytes" % len(header))
+                            return None
+                        continue
+                    
+                    # Проверка правильного формата заголовка
+                    if header[0] != '$' or header[1:3] != b'M<':
+                        print("Didn't get valid header: ", header)
+                        
+                        # Если последняя попытка, попробуем найти символ '$' в потоке
+                        if attempt == max_attempts - 1:
+                            # Поиск первого байта заголовка
+                            start_search = time.time()
+                            valid_header_found = False
+                            
+                            # Пытаемся найти правильный заголовок в течение короткого времени
+                            while time.time() - start_search < 0.2:  # 200 мс таймаут
+                                byte = self.ser.read(1)
+                                if byte == b'$':
+                                    # Нашли '$', теперь пытаемся прочитать остальное
+                                    rest_header = self.ser.read(4)
+                                    if len(rest_header) == 4 and rest_header[0:2] == b'M<':
+                                        header = byte + rest_header
+                                        valid_header_found = True
+                                        break
+                            
+                            if not valid_header_found:
+                                print("Failed to find valid header after searching")
+                                return None
+                        else:
+                            # Не последняя попытка, просто продолжаем
+                            continue
+                    
+                    # У нас есть правильный заголовок, продолжаем обработку
+                    datalength = MultiWii.codeS.unpack(header[-2])[0]
+                    code = MultiWii.codeS.unpack(header[-1])[0]
+                    
+                    # Чтение данных пакета
+                    data = self.ser.read(datalength)
+                    
+                    # Проверка полноты данных
+                    if len(data) < datalength:
+                        print("Incomplete data packet received, expected %d bytes, got %d" % (datalength, len(data)))
+                        if attempt == max_attempts - 1:
+                            return None
+                        continue
+                    
+                    # Чтение контрольной суммы
+                    checksum = self.ser.read()
+                    if len(checksum) < 1:
+                        print("No checksum byte received")
+                        if attempt == max_attempts - 1:
+                            return None
+                        continue
+                    
+                    self.checkChecksum(data, checksum)  # noop now.
+                    readTime = time.time()
+                    elapsed = readTime - start
+                    
+                    # Дальше идет обычная обработка пакета...
+                    if code == MultiWii.ATTITUDE:
+                        temp = MultiWii.ATTITUDE_STRUCT.unpack(data)
+                        self.attitude['cmd'] = code
+                        self.attitude['angx']= temp[0]/10.0
+                        self.attitude['angy']= temp[1]/10.0
+                        self.attitude['heading']= temp[2]
+                        self.attitude['elapsed']= elapsed
+                        self.attitude['timestamp']= readTime
+                        return self.attitude
+                    elif code == MultiWii.BOXIDS:
+                        temp = struct.unpack('<'+'b'*datalength,data)
+                        self.boxids = temp
+                        return self.boxids
+                    elif code == MultiWii.SET_BOX:
+                        print("data", data)
+                        print("len", len(data))
+                    elif code == MultiWii.BOX:
+                        assert datalength % 2 == 0
+                        temp = struct.unpack('<'+'H'*(datalength/2), data)
+                        self.box = temp
+                        return self.box
+                    elif code == MultiWii.ANALOG:
+                        temp = struct.unpack('<'+'B2HhH', data)
+                        self.analog['vbat'] = temp[0]
+                        self.analog['intPowerMeterSum'] = temp[1]
+                        self.analog['rssi'] = temp[2]
+                        self.analog['amperage'] = temp[3]
+                        self.analog['timestamp']= readTime
+                        return self.analog
+                    elif code == MultiWii.BOXNAMES:
+                        print("datalength", datalength)
+                        assert datalength % 2 == 0
+                        temp = struct.unpack('<'+'s' * datalength, data)
+                        temp = "".join(temp)[:-1].split(";")
+                        self.boxnames = temp
+                        return self.boxnames
+                    elif code == MultiWii.STATUS:
+                        print(data)
+                        temp = struct.unpack('<'+'HHHIb',data)
+                        self.status['cycleTime'] = temp[0]
+                        self.status['i2c_errors_count'] = temp[1]
+                        self.status['sensor'] = temp[2]
+                        self.status['flag'] = temp[3]
+                        self.status['global_conf.currentSet'] = temp[4]
+                        self.status['timestamp']= readTime
+                        return self.status
+                    elif code == MultiWii.ACC_CALIBRATION:
+                        print("data", data)
+                        print("len", len(data))
+
+                    elif code == MultiWii.IDENT:
+                        temp = struct.unpack('<'+'BBBI',data)
+                        self.ident["cmd"] = code
+                        self.ident["version"] = temp[0]
+                        self.ident["multitype"] = temp[1]
+                        self.ident["msp_version"] = temp[2]
+                        self.ident["capability"] = temp[3]
+                        self.ident['timestamp']= readTime
+
+                        return self.ident
+                    elif code == MultiWii.RC:
+                        # Handle different RC channel data lengths
+                        num_channels = datalength // 2  # Each channel is 2 bytes
+                        format_string = '<' + 'h' * num_channels
+                        
+                        try:
+                            temp = struct.unpack(format_string, data)
+                            self.rcChannels['cmd'] = code
+                            
+                            # Always set the basic channels
+                            if num_channels >= 1:
+                                self.rcChannels['roll'] = temp[0]
+                            if num_channels >= 2:
+                                self.rcChannels['pitch'] = temp[1]
+                            if num_channels >= 3:
+                                self.rcChannels['yaw'] = temp[2]
+                            if num_channels >= 4:
+                                self.rcChannels['throttle'] = temp[3]
+                            
+                            # Set auxiliary channels if available
+                            aux_channels = min(num_channels - 4, 8)  # Up to 8 aux channels
+                            for i in range(aux_channels):
+                                self.rcChannels['aux' + str(i+1)] = temp[i+4]
+                            
+                            # Clear any remaining aux channels that weren't in the data
+                            for i in range(aux_channels, 8):
+                                if 'aux' + str(i+1) in self.rcChannels:
+                                    self.rcChannels['aux' + str(i+1)] = 0
+                            
+                            self.rcChannels['elapsed'] = elapsed
+                            self.rcChannels['timestamp'] = readTime
+                            
+                            print("Received RC data with %d channels" % num_channels)
+                            return self.rcChannels
+                        except struct.error as e:
+                            print("Error unpacking RC data: %s" % e)
+                            print("Data length: %d, Expected format: %s" % (datalength, format_string))
+                            print("Raw data: %s" % data)
+                            return None
+
+                    elif code == MultiWii.PID:
+                        temp = MultiWii.PID_STRUCT.unpack(data)
+                        self.pid['roll']   = PID(temp[0], temp[1], temp[2])
+                        self.pid['pitch']  = PID(temp[3], temp[4], temp[5])
+                        self.pid['yaw']    = PID(temp[6], temp[7], temp[8])
+                        self.pid['alt']    = PID(temp[9], temp[10], temp[11])
+                        self.pid['pos']    = PID(temp[12], temp[13], temp[14])
+                        self.pid['posr']   = PID(temp[15], temp[16], temp[17])
+                        self.pid['navr']   = PID(temp[18], temp[19], temp[20])
+                        self.pid['level']  = PID(temp[21], temp[22], temp[23])
+                        self.pid['mag']    = PID(temp[24], temp[25], temp[26])
+                        self.pid['vel']    = PID(temp[27], temp[28], temp[29])
+                        print(self.pid)
+                    
+                    elif code == MultiWii.RAW_IMU:
+                        temp = MultiWii.RAW_IMU_STRUCT.unpack(data)
+                        self.rawIMU['cmd'] = code
+                        self.rawIMU['ax']=temp[0]
+                        self.rawIMU['ay']=temp[1]
+                        self.rawIMU['az']=temp[2]
+                        self.rawIMU['gx']=temp[3]
+                        self.rawIMU['gy']=temp[4]
+                        self.rawIMU['gz']=temp[5]
+                        self.rawIMU['timestamp']= readTime
+                        return self.rawIMU
+                    elif code == MultiWii.POS_EST:
+                        temp = struct.unpack('<'+'hhh',data)
+                        self.posest["cmd"] = code
+                        self.posest['x']=float(temp[0])
+                        self.posest['y']=float(temp[1])
+                        self.posest['z']=float(temp[2])
+                        self.posest['elapsed']=elapsed
+                        self.posest['timestamp']=time.time()
+                        return self.posest
+                    elif code == MultiWii.MOTOR:
+                        temp = struct.unpack('<'+'hhhhhhhh',data)
+                        self.motor['cmd'] = code
+                        self.motor['m1']=float(temp[0])
+                        self.motor['m2']=float(temp[1])
+                        self.motor['m3']=float(temp[2])
+                        self.motor['m4']=float(temp[3])
+                        self.motor['m5']=float(temp[4])
+                        self.motor['m6']=float(temp[5])
+                        self.motor['m7']=float(temp[6])
+                        self.motor['m8']=float(temp[7])
+                        self.motor['elapsed']= elapsed
+                        self.motor['timestamp']= readTime
+                        return self.motor
+                    elif code == MultiWii.SET_RAW_RC:
+                        return "Set Raw RC"
+                    else:
+                        print("No return error!: %d" % code)
+                        return None
+                
+                except Exception as e:
+                    print(f"Exception in receiveDataPacket: {e}")
+                    if attempt == max_attempts - 1:
+                        print("Giving up after multiple attempts")
+                        return None
+                    
+                    # Очистка буферов перед следующей попыткой
+                    try:
+                        self.ser.reset_input_buffer()  # для более новых версий pyserial
+                    except:
+                        try:
+                            self.ser.flushInput()  # для старых версий pyserial
+                        except:
+                            pass
+            
+            # Если все попытки не удались
+            return None
 
     """ Implement me to check the checksum. """
     def checkChecksum(self, data, checksum):

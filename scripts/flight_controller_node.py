@@ -105,86 +105,94 @@ class FlightController(object):
         """
         Compute the ROS IMU message by reading data from the board.
         """
+        try:
+            # extract roll, pitch, heading
+            attitude_data = self.board.getData(MultiWii.ATTITUDE)
+            # extract lin_acc_x, lin_acc_y, lin_acc_z
+            imu_data = self.board.getData(MultiWii.RAW_IMU)
 
-        # extract roll, pitch, heading
-        self.board.getData(MultiWii.ATTITUDE)
-        # extract lin_acc_x, lin_acc_y, lin_acc_z
-        self.board.getData(MultiWii.RAW_IMU)
+            # Если не получили данные, прерываем выполнение
+            if attitude_data is None or imu_data is None:
+                print("Failed to get IMU data, skipping update")
+                return
 
-        # calculate values to update imu_message:
-        roll = np.deg2rad(self.board.attitude['angx'])
-        pitch = -np.deg2rad(self.board.attitude['angy'])
-        heading = np.deg2rad(self.board.attitude['heading'])
-        # Note that at pitch angles near 90 degrees, the roll angle reading can
-        # fluctuate a lot
-        # transform heading (similar to yaw) to standard math conventions, which
-        # means angles are in radians and positive rotation is CCW
-        heading = (-heading) % (2 * np.pi)
-        # When first powered up, heading should read near 0
-        # get the previous roll, pitch, heading values
-        previous_quaternion = self.imu_message.orientation
-        quaternion_array = [previous_quaternion.x, previous_quaternion.y, previous_quaternion.z, previous_quaternion.w]
-        previous_roll, previous_pitch, previous_heading = tf.transformations.euler_from_quaternion(quaternion_array)
+            # calculate values to update imu_message:
+            roll = np.deg2rad(self.board.attitude['angx'])
+            pitch = -np.deg2rad(self.board.attitude['angy'])
+            heading = np.deg2rad(self.board.attitude['heading'])
+            # Note that at pitch angles near 90 degrees, the roll angle reading can
+            # fluctuate a lot
+            # transform heading (similar to yaw) to standard math conventions, which
+            # means angles are in radians and positive rotation is CCW
+            heading = (-heading) % (2 * np.pi)
+            # When first powered up, heading should read near 0
+            # get the previous roll, pitch, heading values
+            previous_quaternion = self.imu_message.orientation
+            quaternion_array = [previous_quaternion.x, previous_quaternion.y, previous_quaternion.z, previous_quaternion.w]
+            previous_roll, previous_pitch, previous_heading = tf.transformations.euler_from_quaternion(quaternion_array)
 
-        # Although quaternion_from_euler takes a heading in range [0, 2pi),
-        # euler_from_quaternion returns a heading in range [0, pi] or [0, -pi).
-        # Thus need to convert the returned heading back into the range [0, 2pi).
-        previous_heading = previous_heading % (2 * np.pi)
+            # Although quaternion_from_euler takes a heading in range [0, 2pi),
+            # euler_from_quaternion returns a heading in range [0, pi] or [0, -pi).
+            # Thus need to convert the returned heading back into the range [0, 2pi).
+            previous_heading = previous_heading % (2 * np.pi)
 
-        # transform euler angles into quaternion
-        quaternion = tf.transformations.quaternion_from_euler(roll, pitch, heading)
-        # calculate the linear accelerations
-        lin_acc_x = self.board.rawIMU['ax'] * self.accRawToMss - self.accZeroX
-        lin_acc_y = self.board.rawIMU['ay'] * self.accRawToMss - self.accZeroY
-        lin_acc_z = self.board.rawIMU['az'] * self.accRawToMss - self.accZeroZ
+            # transform euler angles into quaternion
+            quaternion = tf.transformations.quaternion_from_euler(roll, pitch, heading)
+            # calculate the linear accelerations
+            lin_acc_x = self.board.rawIMU['ax'] * self.accRawToMss - self.accZeroX
+            lin_acc_y = self.board.rawIMU['ay'] * self.accRawToMss - self.accZeroY
+            lin_acc_z = self.board.rawIMU['az'] * self.accRawToMss - self.accZeroZ
 
-        # Rotate the IMU frame to align with our convention for the drone's body
-        # frame. IMU: x is forward, y is left, z is up. We want: x is right,
-        # y is forward, z is up.
-        lin_acc_x_drone_body = -lin_acc_y
-        lin_acc_y_drone_body = lin_acc_x
-        lin_acc_z_drone_body = lin_acc_z
+            # Rotate the IMU frame to align with our convention for the drone's body
+            # frame. IMU: x is forward, y is left, z is up. We want: x is right,
+            # y is forward, z is up.
+            lin_acc_x_drone_body = -lin_acc_y
+            lin_acc_y_drone_body = lin_acc_x
+            lin_acc_z_drone_body = lin_acc_z
 
-        # Account for gravity's affect on linear acceleration values when roll
-        # and pitch are nonzero. When the drone is pitched at 90 degrees, for
-        # example, the z acceleration reads out as -9.8 m/s^2. This makes sense,
-        # as the IMU, when powered up / when the calibration script is called,
-        # zeros the body-frame z-axis acceleration to 0, but when it's pitched
-        # 90 degrees, the body-frame z-axis is perpendicular to the force of
-        # gravity, so, as if the drone were in free-fall (which was roughly
-        # confirmed experimentally), the IMU reads -9.8 m/s^2 along the z-axis.
-        g = 9.8
-        lin_acc_x_drone_body = lin_acc_x_drone_body + g*np.sin(roll)*np.cos(pitch)
-        lin_acc_y_drone_body = lin_acc_y_drone_body + g*np.cos(roll)*(-np.sin(pitch))
-        lin_acc_z_drone_body = lin_acc_z_drone_body + g*(1 - np.cos(roll)*np.cos(pitch))
+            # Account for gravity's affect on linear acceleration values when roll
+            # and pitch are nonzero. When the drone is pitched at 90 degrees, for
+            # example, the z acceleration reads out as -9.8 m/s^2. This makes sense,
+            # as the IMU, when powered up / when the calibration script is called,
+            # zeros the body-frame z-axis acceleration to 0, but when it's pitched
+            # 90 degrees, the body-frame z-axis is perpendicular to the force of
+            # gravity, so, as if the drone were in free-fall (which was roughly
+            # confirmed experimentally), the IMU reads -9.8 m/s^2 along the z-axis.
+            g = 9.8
+            lin_acc_x_drone_body = lin_acc_x_drone_body + g*np.sin(roll)*np.cos(pitch)
+            lin_acc_y_drone_body = lin_acc_y_drone_body + g*np.cos(roll)*(-np.sin(pitch))
+            lin_acc_z_drone_body = lin_acc_z_drone_body + g*(1 - np.cos(roll)*np.cos(pitch))
 
-        # calculate the angular velocities of roll, pitch, and yaw in rad/s
-        time = rospy.Time.now()
-        dt = time.to_sec() - self.time.to_sec()
-        dr = roll - previous_roll
-        dp = pitch - previous_pitch
-        dh = heading - previous_heading
-        angvx = self.near_zero(dr / dt)
-        angvy = self.near_zero(dp / dt)
-        angvz = self.near_zero(dh / dt)
-        self.time = time
+            # calculate the angular velocities of roll, pitch, and yaw in rad/s
+            time = rospy.Time.now()
+            dt = time.to_sec() - self.time.to_sec()
+            dr = roll - previous_roll
+            dp = pitch - previous_pitch
+            dh = heading - previous_heading
+            angvx = self.near_zero(dr / dt)
+            angvy = self.near_zero(dp / dt)
+            angvz = self.near_zero(dh / dt)
+            self.time = time
 
-        # Update the imu_message:
-        # header stamp
-        self.imu_message.header.stamp = time
-        # orientation
-        self.imu_message.orientation.x = quaternion[0]
-        self.imu_message.orientation.y = quaternion[1]
-        self.imu_message.orientation.z = quaternion[2]
-        self.imu_message.orientation.w = quaternion[3]
-        # angular velocities
-        self.imu_message.angular_velocity.x = angvx
-        self.imu_message.angular_velocity.y = angvy
-        self.imu_message.angular_velocity.z = angvz
-        # linear accelerations
-        self.imu_message.linear_acceleration.x = lin_acc_x_drone_body
-        self.imu_message.linear_acceleration.y = lin_acc_y_drone_body
-        self.imu_message.linear_acceleration.z = lin_acc_z_drone_body
+            # Update the imu_message:
+            # header stamp
+            self.imu_message.header.stamp = time
+            # orientation
+            self.imu_message.orientation.x = quaternion[0]
+            self.imu_message.orientation.y = quaternion[1]
+            self.imu_message.orientation.z = quaternion[2]
+            self.imu_message.orientation.w = quaternion[3]
+            # angular velocities
+            self.imu_message.angular_velocity.x = angvx
+            self.imu_message.angular_velocity.y = angvy
+            self.imu_message.angular_velocity.z = angvz
+            # linear accelerations
+            self.imu_message.linear_acceleration.x = lin_acc_x_drone_body
+            self.imu_message.linear_acceleration.y = lin_acc_y_drone_body
+            self.imu_message.linear_acceleration.z = lin_acc_z_drone_body
+        except Exception as e:
+            print(f"Error updating IMU message: {e}")
+            # Не поднимаем исключение, чтобы продолжить работу программы
 
     def update_command(self):
         ''' Set command values if the mode is ARMED or DISARMED '''
@@ -241,11 +249,22 @@ class FlightController(object):
     def send_rc_cmd(self):
         """ Send commands to the flight controller board """
         assert len(self.command) is 8, "COMMAND HAS WRONG SIZE, expected 8, got "+str(len(self.command))
-        self.board.send_raw_command(8, MultiWii.SET_RAW_RC, self.command)
-        self.board.receiveDataPacket()
-        if (self.command != self.last_command):
-            print('new command sent:', self.command)
-            self.last_command = self.command
+        try:
+            self.board.send_raw_command(8, MultiWii.SET_RAW_RC, self.command)
+            result = self.board.receiveDataPacket()
+            
+            # Если результат None, значит произошла ошибка при чтении ответа,
+            # но это не критично для отправки команды
+            if result is None:
+                print("Warning: Did not receive confirmation for command")
+            
+            if (self.command != self.last_command):
+                print('new command sent:', self.command)
+                self.last_command = self.command
+                
+        except Exception as e:
+            print(f"Error sending RC command: {e}")
+            # Не поднимаем исключение, чтобы продолжить работу программы
 
     def near_zero(self, n):
         """ Set a number to zero if it is below a threshold value """
