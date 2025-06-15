@@ -205,12 +205,12 @@ class MultiWii:
                 if result is not None:
                     return result
                 
-                # Если результат None, но это не последняя попытка
+                # If result is None, but this is not the last attempt
                 if retry < max_retries - 1:
                     print(f"Failed to get data on attempt {retry+1}, retrying...")
-                    # Пауза перед следующей попыткой
+                    # Pause before next attempt
                     time.sleep(0.05)
-                    # Очистка буферов
+                    # Clear buffers
                     try:
                         self.ser.reset_input_buffer()
                         self.ser.reset_output_buffer()
@@ -225,10 +225,10 @@ class MultiWii:
                 if retry < max_retries - 1:
                     time.sleep(0.05)
                 else:
-                    # Если это последняя попытка, возвращаем None
+                    # If this is the last attempt, return None
                     return None
         
-        # Если все попытки не удались
+        # If all attempts failed
         print(f"Failed to get data after {max_retries} attempts")
         return None
 
@@ -243,17 +243,17 @@ class MultiWii:
 
     def receiveDataPacket(self):
         with self.serial_port_read_lock:
-            max_attempts = 3  # Максимальное количество попыток чтения заголовка
+            max_attempts = 3  # Maximum number of attempts to read the header
             
             for attempt in range(max_attempts):
                 try:
-                    # Начинаем отсчет времени для замера длительности операции
+                    # Start the timer to measure operation duration
                     start = time.time()
                     
-                    # Попытка считать заголовок (5 байт)
+                    # Try to read the header (5 bytes)
                     header = self.ser.read(5)
                     
-                    # Проверка тайм-аута (ничего не получено)
+                    # Check for timeout (nothing received)
                     if len(header) == 0:
                         if attempt == max_attempts - 1:
                             print("Timeout on receiveDataPacket after %d attempts" % max_attempts)
@@ -261,28 +261,28 @@ class MultiWii:
                         print("Timeout on attempt %d, retrying..." % (attempt + 1))
                         continue
                     
-                    # Проверка неполного заголовка
+                    # Check for incomplete header
                     if len(header) < 5:
                         if attempt == max_attempts - 1:
                             print("Incomplete header read, got only %d bytes" % len(header))
                             return None
                         continue
                     
-                    # Проверка правильного формата заголовка
+                    # Check for correct header format
                     if header[0] != '$' or header[1:3] != b'M<':
                         print("Didn't get valid header: ", header)
                         
-                        # Если последняя попытка, попробуем найти символ '$' в потоке
+                        # If last attempt, try to find the '$' symbol in the stream
                         if attempt == max_attempts - 1:
-                            # Поиск первого байта заголовка
+                            # Search for the first byte of the header
                             start_search = time.time()
                             valid_header_found = False
                             
-                            # Пытаемся найти правильный заголовок в течение короткого времени
-                            while time.time() - start_search < 0.2:  # 200 мс таймаут
+                            # Try to find the correct header for a short time
+                            while time.time() - start_search < 0.2:  # 200 ms timeout
                                 byte = self.ser.read(1)
                                 if byte == b'$':
-                                    # Нашли '$', теперь пытаемся прочитать остальное
+                                    # Found '$', now try to read the rest
                                     rest_header = self.ser.read(4)
                                     if len(rest_header) == 4 and rest_header[0:2] == b'M<':
                                         header = byte + rest_header
@@ -293,24 +293,24 @@ class MultiWii:
                                 print("Failed to find valid header after searching")
                                 return None
                         else:
-                            # Не последняя попытка, просто продолжаем
+                            # Not the last attempt, just continue
                             continue
                     
-                    # У нас есть правильный заголовок, продолжаем обработку
+                    # We have a valid header, continue processing
                     datalength = MultiWii.codeS.unpack(header[-2])[0]
                     code = MultiWii.codeS.unpack(header[-1])[0]
                     
-                    # Чтение данных пакета
+                    # Read packet data
                     data = self.ser.read(datalength)
                     
-                    # Проверка полноты данных
+                    # Check data completeness
                     if len(data) < datalength:
                         print("Incomplete data packet received, expected %d bytes, got %d" % (datalength, len(data)))
                         if attempt == max_attempts - 1:
                             return None
                         continue
                     
-                    # Чтение контрольной суммы
+                    # Read checksum
                     checksum = self.ser.read()
                     if len(checksum) < 1:
                         print("No checksum byte received")
@@ -322,7 +322,7 @@ class MultiWii:
                     readTime = time.time()
                     elapsed = readTime - start
                     
-                    # Дальше идет обычная обработка пакета...
+                    # Standard packet processing follows...
                     if code == MultiWii.ATTITUDE:
                         temp = MultiWii.ATTITUDE_STRUCT.unpack(data)
                         self.attitude['cmd'] = code
@@ -483,16 +483,16 @@ class MultiWii:
                         print("Giving up after multiple attempts")
                         return None
                     
-                    # Очистка буферов перед следующей попыткой
+                    # Clean buffers before next attempt
                     try:
-                        self.ser.reset_input_buffer()  # для более новых версий pyserial
+                        self.ser.reset_input_buffer()  # for newer pyserial versions
                     except:
                         try:
-                            self.ser.flushInput()  # для старых версий pyserial
+                            self.ser.flushInput()  # for older pyserial versions
                         except:
                             pass
             
-            # Если все попытки не удались
+            # If all attempts failed
             return None
 
     """ Implement me to check the checksum. """

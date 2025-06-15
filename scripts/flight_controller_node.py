@@ -111,7 +111,7 @@ class FlightController(object):
             # extract lin_acc_x, lin_acc_y, lin_acc_z
             imu_data = self.board.getData(MultiWii.RAW_IMU)
 
-            # Если не получили данные, прерываем выполнение
+            # If no data received, skip this update
             if attitude_data is None or imu_data is None:
                 print("Failed to get IMU data, skipping update")
                 return
@@ -192,7 +192,7 @@ class FlightController(object):
             self.imu_message.linear_acceleration.z = lin_acc_z_drone_body
         except Exception as e:
             print(f"Error updating IMU message: {e}")
-            # Не поднимаем исключение, чтобы продолжить работу программы
+            # Don't raise exception to continue program execution
 
     def update_command(self):
         ''' Set command values if the mode is ARMED or DISARMED '''
@@ -253,8 +253,8 @@ class FlightController(object):
             self.board.send_raw_command(8, MultiWii.SET_RAW_RC, self.command)
             result = self.board.receiveDataPacket()
             
-            # Если результат None, значит произошла ошибка при чтении ответа,
-            # но это не критично для отправки команды
+            # If result is None, an error occurred while reading the response,
+            # but this is not critical for sending the command
             if result is None:
                 print("Warning: Did not receive confirmation for command")
             
@@ -264,7 +264,7 @@ class FlightController(object):
                 
         except Exception as e:
             print(f"Error sending RC command: {e}")
-            # Не поднимаем исключение, чтобы продолжить работу программы
+            # Don't raise exception to continue program execution
 
     def near_zero(self, n):
         """ Set a number to zero if it is below a threshold value """
