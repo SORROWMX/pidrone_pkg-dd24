@@ -1,0 +1,4 @@
+<launch>
+    <!-- This is a minimal test launch file to verify MSP communication -->
+    <node name="msp_offboard" pkg="pidrone_pkg" type="msp_offboard.py" output="screen" />
+</launch> 

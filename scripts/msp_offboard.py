@@ -29,15 +29,10 @@ class MSPOffboard:
         # Initialize ROS node
         rospy.init_node('msp_offboard')
         
-        # Connect to flight controller
-        try:
-            self.board = MultiWii('/dev/ttyACM0')
-        except SerialException:
-            try:
-                self.board = MultiWii('/dev/ttyACM1')
-            except SerialException:
-                rospy.logerr('Failed to connect to flight controller!')
-                raise
+        # Connect to the flight controller board using the same approach as flight_controller_node
+        print("Connecting to flight controller board...")
+        self.board = self.getBoard()
+        print("Connected to flight controller board")
         
         # Flight parameters
         self.default_speed = 0.5  # m/s
@@ -56,6 +51,7 @@ class MSPOffboard:
         self.target_velocity = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         self.target_yaw = 0.0
         self.control_mode = 'position'  # 'position' or 'velocity'
+        self.last_command = list(cmds.disarm_cmd)  # Store last command for comparison
         
         # Locks for thread safety
         self.state_lock = Lock()
@@ -82,10 +78,12 @@ class MSPOffboard:
         ##########################
         import rospkg
         import yaml
+        print("Loading calibration data...")
         rospack = rospkg.RosPack()
         path = rospack.get_path('pidrone_pkg')
         with open("%s/params/multiwii.yaml" % path) as f:
             means = yaml.load(f)
+        print("Calibration data loaded")
         
         self.accRawToMss = 9.8 / means["az"]
         self.accZeroX = means["ax"] * self.accRawToMss
@@ -272,7 +270,10 @@ class MSPOffboard:
                 # Generate command based on target position/velocity
                 self.update_command()
                 
-                # Send command
+                # Send command to the flight controller board directly
+                self.send_rc_cmd()
+                
+                # Also publish command to ROS for other nodes
                 rc_msg = RC()
                 rc_msg.roll = self.current_command[0]
                 rc_msg.pitch = self.current_command[1]
@@ -922,6 +923,44 @@ class MSPOffboard:
                 
         response.message = "\n".join(telemetry_str)
         return response
+
+    def getBoard(self):
+        """ Connect to the flight controller board """
+        # (if the flight controller usb is unplugged and plugged back in,
+        #  it becomes .../USB1)
+        import sys
+        try:
+            board = MultiWii('/dev/ttyACM0')
+        except SerialException as e:
+            print(("usb0 failed: " + str(e)))
+            try:
+                board = MultiWii('/dev/ttyACM1')
+            except SerialException:
+                print('\nCannot connect to the flight controller board.')
+                print('The USB is unplugged. Please check connection.')
+                raise
+                sys.exit()
+        return board
+
+    def send_rc_cmd(self):
+        """ Send commands to the flight controller board """
+        assert len(self.current_command) is 8, "COMMAND HAS WRONG SIZE, expected 8, got "+str(len(self.current_command))
+        try:
+            self.board.send_raw_command(8, MultiWii.SET_RAW_RC, self.current_command)
+            result = self.board.receiveDataPacket()
+            
+            # If result is None, an error occurred while reading the response,
+            # but this is not critical for sending the command
+            if result is None:
+                print("Warning: Did not receive confirmation for command")
+            
+            if (self.current_command != self.last_command):
+                print('New command sent:', self.current_command)
+                self.last_command = list(self.current_command)
+                
+        except Exception as e:
+            rospy.logerr("Error sending RC command: {}".format(e))
+            # Don't raise exception to continue program execution
 
 def main():
     import sys
