@@ -1,12 +1,12 @@
 #!/usr/bin/env python
-import traceback
-import sys
-import yaml
 
 import rospy
 import rospkg
-import signal
+import yaml
 import numpy as np
+import signal
+import traceback
+import sys
 
 print("tf import")
 import tf
@@ -286,10 +286,6 @@ class FlightController(object):
         """
         curr_time = rospy.Time.now()
         disarm = False
-        if curr_time - self.heartbeat_web_interface > rospy.Duration.from_sec(3):
-            print('\nSafety Failure: web interface heartbeat\n')
-            print('The web interface stopped responding. Check your browser')
-            disarm = True
         if curr_time - self.heartbeat_pid_controller > rospy.Duration.from_sec(1):
             print('\nSafety Failure: not receiving flight commands.')
             print('Check the pid_controller node\n')
@@ -313,78 +309,85 @@ class FlightController(object):
 
 
 def main():
+    # Filter ROS arguments
+    filtered_argv = rospy.myargv(argv=sys.argv)
+    
     # ROS Setup
     ###########
     node_name = os.path.splitext(os.path.basename(__file__))[0]
     print("init")
     rospy.init_node(node_name)
     print("done")
-    # create the FlightController object
-    fc = FlightController()
-    curr_time = rospy.Time.now()
-    fc.heartbeat_infrared = curr_time
-    fc.range = None
-    fc.heartbeat_web_interface= curr_time
-    fc.heartbeat_pid_controller = curr_time
-    fc.heartbeat_flight_controller = curr_time
-    fc.heartbeat_state_estimator = curr_time
-
-    # Publishers
-    ###########
-    imupub = rospy.Publisher('/pidrone/imu', Imu, queue_size=1, tcp_nodelay=False)
-    fc.modepub = rospy.Publisher('/pidrone/mode', Mode, queue_size=1, tcp_nodelay=False)
-    print('Publishing:')
-    print('/pidrone/imu')
-    print('/pidrone/mode')
-
-    # Subscribers
-    ############
-    rospy.Subscriber("/pidrone/desired/mode", Mode, fc.desired_mode_callback)
-    rospy.Subscriber('/pidrone/fly_commands', RC, fc.fly_commands_callback)
-    # heartbeat subscribers
-    rospy.Subscriber("/pidrone/range", Range, fc.heartbeat_infrared_callback)
-    rospy.Subscriber("/pidrone/heartbeat/web_interface", Empty, fc.heartbeat_web_interface_callback)
-    rospy.Subscriber("/pidrone/heartbeat/pid_controller", Empty, fc.heartbeat_pid_controller_callback)
-    rospy.Subscriber("/pidrone/state", State, fc.heartbeat_state_estimator_callback)
-
-
-    # signal.signal(signal.SIGINT, fc.ctrl_c_handler)
-    # set the loop rate (Hz)
-    r = rospy.Rate(60)
+    
     try:
-        while not rospy.is_shutdown():
-            # if the current mode is anything other than disarmed
-            # preform as safety check
-                # Break the loop if a safety check has failed
-            if fc.shouldIDisarm():
-                print("mode", fc.curr_mode)
-                break
+        # create the FlightController object
+        fc = FlightController()
+        curr_time = rospy.Time.now()
+        fc.heartbeat_infrared = curr_time
+        fc.range = None
+        fc.heartbeat_web_interface= curr_time
+        fc.heartbeat_pid_controller = curr_time
+        fc.heartbeat_flight_controller = curr_time
+        fc.heartbeat_state_estimator = curr_time
+    
+        # Publishers
+        ###########
+        imupub = rospy.Publisher('/pidrone/imu', Imu, queue_size=1, tcp_nodelay=False)
+        fc.modepub = rospy.Publisher('/pidrone/mode', Mode, queue_size=1, tcp_nodelay=False)
+        print('Publishing:')
+        print('/pidrone/imu')
+        print('/pidrone/mode')
+    
+        # Subscribers
+        ############
+        rospy.Subscriber("/pidrone/desired/mode", Mode, fc.desired_mode_callback)
+        rospy.Subscriber('/pidrone/fly_commands', RC, fc.fly_commands_callback)
+        # heartbeat subscribers
+        rospy.Subscriber("/pidrone/range", Range, fc.heartbeat_infrared_callback)
+        rospy.Subscriber("/pidrone/heartbeat/web_interface", Empty, fc.heartbeat_web_interface_callback)
+        rospy.Subscriber("/pidrone/heartbeat/pid_controller", Empty, fc.heartbeat_pid_controller_callback)
+        rospy.Subscriber("/pidrone/state", State, fc.heartbeat_state_estimator_callback)
+    
+    
+        # signal.signal(signal.SIGINT, fc.ctrl_c_handler)
+        # set the loop rate (Hz)
+        r = rospy.Rate(60)
+        try:
+            while not rospy.is_shutdown():
+                # if the current mode is anything other than disarmed
+                # preform as safety check
+                    # Break the loop if a safety check has failed
+                if fc.shouldIDisarm():
+                    print("mode", fc.curr_mode)
+                    break
+                    
+                # update and publish flight controller readings
+                fc.update_imu_message()
+                imupub.publish(fc.imu_message)
+    
+                # update and send the flight commands to the board
+                fc.update_command()
+                fc.send_rc_cmd()
+    
+                # publish the current mode of the drone
+                fc.modepub.publish(fc.curr_mode)
+    
+                # sleep for the remainder of the loop time
+                r.sleep()
                 
-            # update and publish flight controller readings
-            fc.update_imu_message()
-            imupub.publish(fc.imu_message)
-
-            # update and send the flight commands to the board
-            fc.update_command()
-            fc.send_rc_cmd()
-
-            # publish the current mode of the drone
-            fc.modepub.publish(fc.curr_mode)
-
-            # sleep for the remainder of the loop time
-            r.sleep()
-            
-    except SerialException:
-        print('\nCannot connect to the flight controller board.')
-        print('The USB is unplugged. Please check connection.')
-    except Exception as e:
-        print('there was an internal error', e)
-        print(traceback.format_exc())
-    finally:
-        print('Shutdown received')
-        print('Sending DISARM command')
-        fc.board.send_raw_command(8, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
-        fc.board.receiveDataPacket()
+        except SerialException:
+            print('\nCannot connect to the flight controller board.')
+            print('The USB is unplugged. Please check connection.')
+        except Exception as e:
+            print('there was an internal error', e)
+            print(traceback.format_exc())
+        finally:
+            print('Shutdown received')
+            print('Sending DISARM command')
+            fc.board.send_raw_command(8, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
+            fc.board.receiveDataPacket()
+    except rospy.ROSInterruptException:
+        pass
 
 
 if __name__ == '__main__':

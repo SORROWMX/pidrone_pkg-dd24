@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 
 import tf
@@ -251,8 +251,14 @@ class RigidTransformNode(object):
         
     
 def main():
-    rigid_transform_node = RigidTransformNode("rigid_transform_node")
-    rospy.spin()
+    import sys
+    filtered_argv = rospy.myargv(argv=sys.argv)
+    
+    try:
+        node = RigidTransformNode('rigid_transform_node')
+        rospy.spin()
+    except rospy.ROSInterruptException:
+        pass
 
 if __name__ == '__main__':
     main()

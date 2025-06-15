@@ -295,87 +295,43 @@ def check_positive_float_duration(val):
         
 
 def main():
-    parser = argparse.ArgumentParser(description=('The state estimator node '
-                'can provide state estimates using a 1D UKF (2D state vector), '
-                'a 3D UKF (7D or 12D state vector), an EMA, MoCap, or '
-                'simulated ground truth data. The default is the EMA. The '
-                'default UKF is the UKF with 2D state vector. The primary '
-                'state estimator determines what is published to '
-                '/pidrone/state, except that an incomplete state estimator '
-                'like the 2D UKF will also use EMA estimates to populate x and '
-                'y position, for example.'))
-                
-    arg_choices = ['ema', 'ukf2d', 'ukf7d', 'ukf12d', 'mocap', 'simulator']
+    # Use rospy.myargv() to filter out ROS-specific args
+    import sys
+    filtered_argv = rospy.myargv(argv=sys.argv)
     
-    parser.add_argument('--primary', '-p',
-                        choices=arg_choices,
-                        default='ema',
-                        help='Select the primary state estimation method')
-    parser.add_argument('--others', '-o',
-                        choices=arg_choices,
-                        nargs='+',
-                        help=('Select other state estimation nodes to run '
-                              'alongside the primary state estimator, e.g., '
-                              'for visualization or debugging purposes'))
-                              
-    # Arguments to determine if the throttle command is being used. E.g.:
-    #   rosrun topic_tools throttle messages /pidrone/infrared 40.0
-    # If one of these is passed in, it will act on all state estimators that can
-    # take it in as a command-line argument.
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--primary', '-p', default='ukf7d',
+                        choices=['ema', 'ukf2d', 'ukf7d', 'ukf12d', 'mocap', 'simulator'],
+                        help="""Specify the primary state estimator.
+                                Default: %(default)s""")
+    parser.add_argument('--others', '-o', nargs='+',
+                        choices=['ema', 'ukf2d', 'ukf7d', 'ukf12d', 'mocap', 'simulator'],
+                        help="""Other state estimators to run.
+                                Default: none""")
     parser.add_argument('--ir_throttled', action='store_true',
-                        help=('Use throttled infrared topic /pidrone/infrared_throttle'))
+                        help='Enable throttling of IR data')
     parser.add_argument('--imu_throttled', action='store_true',
-                        help=('Use throttled IMU topic /pidrone/imu_throttle'))
+                        help='Enable throttling of IMU data')
     parser.add_argument('--optical_flow_throttled', action='store_true',
-                        help=('Use throttled optical flow topic /pidrone/picamera/twist_throttle'))
+                        help='Enable throttling of optical flow data')
     parser.add_argument('--camera_pose_throttled', action='store_true',
-                        help=('Use throttled camera pose topic /pidrone/picamera/pose_throttle'))
-                        
+                        help='Enable throttling of camera pose data')
     parser.add_argument('--sdim', default=1, type=int, choices=[1, 2, 3],
-                        help=('Number of spatial dimensions in which to '
-                              'simulate the drone\'s motion, if running the '
-                              'drone simulator (default: 1)'))
-                              
+                        help='Number of spatial dimensions for the simulator')
     parser.add_argument('--student_ukf', action='store_true',
-                        help=('Use student UKF'))
-    # TODO: Test out the --ir_var flag
+                        help='Use student UKF implementation')
     parser.add_argument('--ir_var', type=float,
-                        help=('IR sensor variance to use in 1D simulation'))
-                        
-    parser.add_argument('--loop_hz', '-hz', default=30.0,
-                        type=check_positive_float_duration,
-                        help=('Frequency at which to run the predict-update '
-                              'loop of the UKF (default: 30)'))
-                              
-    args = parser.parse_args()
+                        help='Override IR variance in the simulator')
+    parser.add_argument('--loop_hz', type=check_positive_float_duration,
+                        help='The rate of state estimation in Hz')
     
-    se = None
+    # Parse known arguments and ignore the rest (ROS args)
+    args, unknown = parser.parse_known_args(filtered_argv)
     
     try:
-        se = StateEstimator(primary=args.primary,
-                            others=args.others,
-                            ir_throttled=args.ir_throttled,
-                            imu_throttled=args.imu_throttled,
-                            optical_flow_throttled=args.optical_flow_throttled,
-                            camera_pose_throttled=args.camera_pose_throttled,
-                            sdim=args.sdim,
-                            student_ukf=args.student_ukf,
-                            ir_var=args.ir_var,
-                            loop_hz=args.loop_hz)
-    except Exception as e:
-        print(e)
-    finally:
-        # Terminate the subprocess calls. Note, however, that if Ctrl-C is
-        # entered in stdin, it seems that the subprocesses also get the Ctrl-C
-        # input and are terminating based on KeyboardInterrupt
-        print('Terminating subprocess calls...')
-        if se is not None and hasattr(se, 'processes'):
-            for process in se.processes:
-                process_name = process[0]
-                process_obj = process[1]
-                print('Terminating:', process_name)
-                process_obj.terminate()
-        print('Done.')
+        se = StateEstimator(**vars(args))
+    except rospy.ROSInterruptException:
+        pass
 
 
 if __name__ == "__main__":

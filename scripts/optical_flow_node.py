@@ -206,8 +206,14 @@ class OpticalFlowNode(object):
         return lower_coeff + ratio * (upper_coeff - lower_coeff)
 
 def main():
-    optical_flow_node = OpticalFlowNode("optical_flow_node")
-    rospy.spin()
+    import sys
+    filtered_argv = rospy.myargv(argv=sys.argv)
+    
+    try:
+        node = OpticalFlowNode('optical_flow_node')
+        rospy.spin()
+    except rospy.ROSInterruptException:
+        pass
 
 if __name__ == '__main__':
     main()

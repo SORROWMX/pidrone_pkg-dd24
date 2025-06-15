@@ -333,6 +333,10 @@ class PIDController(object):
 
 def main(ControllerClass):
 
+    # Use rospy.myargv() to filter out ROS-specific args
+    import sys
+    filtered_argv = rospy.myargv(argv=sys.argv)
+    
     parser = argparse.ArgumentParser(
                     prog='PID Controller',
                     description= """
@@ -347,10 +351,12 @@ def main(ControllerClass):
         '--verbose',
         choices=[0,1,2],
         default=0,
+        type=int,
         help="Verbosity between 0 and 2, 2 is most verbose"
         )
     
-    args = parser.parse_args()
+    # Parse known arguments and ignore the rest (ROS args)
+    args, unknown_args = parser.parse_known_args(filtered_argv)
 
     # ROS Setup
     ###########

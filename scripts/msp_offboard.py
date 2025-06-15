@@ -730,7 +730,10 @@ class MSPOffboard:
         response.message = "\n".join(telemetry_str)
         return response
 
-if __name__ == '__main__':
+def main():
+    import sys
+    filtered_argv = rospy.myargv(argv=sys.argv)
+    
     try:
         offboard = MSPOffboard()
         rospy.spin()
@@ -740,3 +743,6 @@ if __name__ == '__main__':
         rospy.logerr("Error: {0}".format(e))
         import traceback
         traceback.print_exc() 
+
+if __name__ == '__main__':
+    main() 
