@@ -154,7 +154,7 @@ class PID:
             desired_yaw_velocity: desired yaw velocity
 
         Returns:
-            [roll, pitch, throttle, yaw] control outputs
+            [roll, pitch, throttle, yaw] control outputs - order matches AETR map in INAV
         """
         # Extract errors
         x_error = pid_error.x
@@ -185,7 +185,7 @@ class PID:
         # Update last throttle command
         self.last_throttle_cmd = filtered_throttle_cmd
         
-        # Return control commands
+        # Return control commands in order [roll, pitch, throttle, yaw] to match AETR map
         return [roll_cmd, pitch_cmd, int(filtered_throttle_cmd), yaw_cmd]
 
     def reset(self):

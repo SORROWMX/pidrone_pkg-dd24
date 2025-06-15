@@ -1,4 +1,4 @@
-# [r,p,y,t]
+# [r,p,t,y]
 # Format: [roll, pitch, throttle, yaw, aux1, aux2, aux3, aux4]
 # AUX1 is used for arming/disarming:
 # - AUX1 < 1500: disarmed

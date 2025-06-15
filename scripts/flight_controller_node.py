@@ -96,6 +96,7 @@ class FlightController(object):
             p = msg.pitch
             y = msg.yaw
             t = msg.throttle
+            # Format: [roll, pitch, throttle, yaw] to match AETR map in INAV
             self.command = [r, p, t, y] + cmds.idle_cmd[4:8]
 
 

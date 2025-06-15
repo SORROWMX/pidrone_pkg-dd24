@@ -275,10 +275,11 @@ class MSPOffboard:
                 
                 # Also publish command to ROS for other nodes
                 rc_msg = RC()
+                # Commands are in order [roll, pitch, throttle, yaw] to match AETR map in INAV
                 rc_msg.roll = self.current_command[0]
                 rc_msg.pitch = self.current_command[1]
-                rc_msg.yaw = self.current_command[2]
-                rc_msg.throttle = self.current_command[3]
+                rc_msg.throttle = self.current_command[2]
+                rc_msg.yaw = self.current_command[3]
                 self.rc_pub.publish(rc_msg)
     
     def telemetry_timer_callback(self, event):
@@ -383,7 +384,7 @@ class MSPOffboard:
         pitch_cmd = max(min(pitch_cmd, 1700), 1300)
         throttle_cmd = max(min(throttle_cmd, 1700), 1300)
         
-        # Update command
+        # Update command in order [roll, pitch, throttle, yaw] to match AETR map in INAV
         self.current_command = [roll_cmd, pitch_cmd, throttle_cmd, yaw_cmd, 1900, 1000, 1000, 1000]
     
     def _update_velocity_control(self):
@@ -404,7 +405,7 @@ class MSPOffboard:
         throttle_cmd = max(min(throttle_cmd, 1700), 1300)
         yaw_cmd = max(min(yaw_cmd, 1700), 1300)
         
-        # Update command
+        # Update command in order [roll, pitch, throttle, yaw] to match AETR map in INAV
         self.current_command = [roll_cmd, pitch_cmd, throttle_cmd, yaw_cmd, 1900, 1000, 1000, 1000]
     
     def arm(self):
@@ -986,6 +987,7 @@ def main():
         try:
             if 'offboard' in locals() and hasattr(offboard, 'board') and offboard.board is not None:
                 print('Sending DISARM command before exit')
+                # Using disarm_cmd with correct order [roll, pitch, throttle, yaw]
                 offboard.board.send_raw_command(8, MultiWii.SET_RAW_RC, cmds.disarm_cmd)
                 offboard.board.receiveDataPacket()
                 print('DISARM command sent')
