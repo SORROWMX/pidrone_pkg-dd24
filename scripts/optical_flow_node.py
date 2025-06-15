@@ -19,6 +19,7 @@ class OpticalFlowNode(object):
     Enhanced version with data filtering and adaptive sensitivity.
     """
     def __init__(self, node_name):
+        # Initialize ROS node
         rospy.init_node(node_name)
         
         # Optical flow parameters
@@ -63,9 +64,7 @@ class OpticalFlowNode(object):
             0.5: 0.6     # Decrease sensitivity at high altitude
         }
         
-        self.setup()
-
-    def setup(self):
+        # Setup publishers and subscribers directly in __init__
         # Publishers
         self.twistpub = rospy.Publisher('/pidrone/picamera/twist', TwistStamped, queue_size=1)
         self.quality_pub = rospy.Publisher('/pidrone/picamera/flow_quality', Float32, queue_size=1)

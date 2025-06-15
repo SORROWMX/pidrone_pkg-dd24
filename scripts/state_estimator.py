@@ -33,6 +33,10 @@ class StateEstimator(object):
     def __init__(self, primary, others, ir_throttled=False, imu_throttled=False,
                  optical_flow_throttled=False, camera_pose_throttled=False,
                  sdim=1, student_ukf=False, ir_var=None, loop_hz=None):
+        # Initialize ROS node first
+        node_name = os.path.splitext(os.path.basename(__file__))[0]
+        rospy.init_node(node_name)
+        
         self.state_msg = State()
         
         self.ir_throttled = ir_throttled
@@ -101,14 +105,10 @@ class StateEstimator(object):
 
         self.setup_ukf_with_ground_truth()
         self.start_estimator_subprocess_cmds()
-        self.initialize_ros()
-
-    def initialize_ros(self):
-        node_name = os.path.splitext(os.path.basename(__file__))[0]
-        rospy.init_node(node_name)
-
+        
+        # No need to call initialize_ros() since we already initialized at the beginning
         rospy.spin()
-    
+
     def start_estimator_subprocess_cmds(self):
         cmd = self.process_cmds_dict[self.primary_estimator]
         cmd = self.append_throttle_flags(cmd, self.primary_estimator)
@@ -329,7 +329,8 @@ def main():
     args, unknown = parser.parse_known_args(filtered_argv)
     
     try:
-        se = StateEstimator(**vars(args))
+        # StateEstimator constructor now handles initialization and rospy.spin()
+        StateEstimator(**vars(args))
     except rospy.ROSInterruptException:
         pass
 

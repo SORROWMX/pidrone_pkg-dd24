@@ -29,7 +29,7 @@ class RigidTransformNode(object):
     ~position_control
     """
     def __init__(self, node_name):
-        # initialize the DTROS parent class
+        # Initialize ROS node first
         rospy.init_node(node_name)
 
         camera_wh = (320, 240)
