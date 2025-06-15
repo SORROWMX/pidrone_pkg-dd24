@@ -207,7 +207,7 @@ class MultiWii:
                 
                 # If result is None, but this is not the last attempt
                 if retry < max_retries - 1:
-                    print(f"Failed to get data on attempt {retry+1}, retrying...")
+                    print("Failed to get data on attempt {}, retrying...".format(retry+1))
                     # Pause before next attempt
                     time.sleep(0.05)
                     # Clear buffers
@@ -221,7 +221,7 @@ class MultiWii:
                         except:
                             pass
             except Exception as e:
-                print(f"Error in getData: {e}")
+                print("Error in getData: {}".format(e))
                 if retry < max_retries - 1:
                     time.sleep(0.05)
                 else:
@@ -229,7 +229,7 @@ class MultiWii:
                     return None
         
         # If all attempts failed
-        print(f"Failed to get data after {max_retries} attempts")
+        print("Failed to get data after {} attempts".format(max_retries))
         return None
 
     """ Sends a request for N commands from the board. """
@@ -256,15 +256,15 @@ class MultiWii:
                     # Check for timeout (nothing received)
                     if len(header) == 0:
                         if attempt == max_attempts - 1:
-                            print("Timeout on receiveDataPacket after %d attempts" % max_attempts)
+                            print("Timeout on receiveDataPacket after {} attempts".format(max_attempts))
                             return None
-                        print("Timeout on attempt %d, retrying..." % (attempt + 1))
+                        print("Timeout on attempt {}, retrying...".format(attempt + 1))
                         continue
                     
                     # Check for incomplete header
                     if len(header) < 5:
                         if attempt == max_attempts - 1:
-                            print("Incomplete header read, got only %d bytes" % len(header))
+                            print("Incomplete header read, got only {} bytes".format(len(header)))
                             return None
                         continue
                     
@@ -305,7 +305,7 @@ class MultiWii:
                     
                     # Check data completeness
                     if len(data) < datalength:
-                        print("Incomplete data packet received, expected %d bytes, got %d" % (datalength, len(data)))
+                        print("Incomplete data packet received, expected {} bytes, got {}".format(datalength, len(data)))
                         if attempt == max_attempts - 1:
                             return None
                         continue
@@ -415,12 +415,12 @@ class MultiWii:
                             self.rcChannels['elapsed'] = elapsed
                             self.rcChannels['timestamp'] = readTime
                             
-                            print("Received RC data with %d channels" % num_channels)
+                            print("Received RC data with {} channels".format(num_channels))
                             return self.rcChannels
                         except struct.error as e:
-                            print("Error unpacking RC data: %s" % e)
-                            print("Data length: %d, Expected format: %s" % (datalength, format_string))
-                            print("Raw data: %s" % data)
+                            print("Error unpacking RC data: {}".format(e))
+                            print("Data length: {}, Expected format: {}".format(datalength, format_string))
+                            print("Raw data: {}".format(data))
                             return None
 
                     elif code == MultiWii.PID:
@@ -474,11 +474,11 @@ class MultiWii:
                     elif code == MultiWii.SET_RAW_RC:
                         return "Set Raw RC"
                     else:
-                        print("No return error!: %d" % code)
+                        print("No return error!: {}".format(code))
                         return None
                 
                 except Exception as e:
-                    print(f"Exception in receiveDataPacket: {e}")
+                    print("Exception in receiveDataPacket: {}".format(e))
                     if attempt == max_attempts - 1:
                         print("Giving up after multiple attempts")
                         return None

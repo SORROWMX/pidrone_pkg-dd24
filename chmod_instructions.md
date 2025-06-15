@@ -36,3 +36,4 @@ source devel/setup.bash
 ```
 
 После этих действий ROS должен корректно находить и запускать ваши узлы. 
+git checkout -- scripts/flight_controller_node.py scripts/msp_offboard.py

@@ -191,7 +191,7 @@ class FlightController(object):
             self.imu_message.linear_acceleration.y = lin_acc_y_drone_body
             self.imu_message.linear_acceleration.z = lin_acc_z_drone_body
         except Exception as e:
-            print(f"Error updating IMU message: {e}")
+            print("Error updating IMU message: {}".format(e))
             # Don't raise exception to continue program execution
 
     def update_command(self):
@@ -263,7 +263,7 @@ class FlightController(object):
                 self.last_command = self.command
                 
         except Exception as e:
-            print(f"Error sending RC command: {e}")
+            print("Error sending RC command: {}".format(e))
             # Don't raise exception to continue program execution
 
     def near_zero(self, n):
