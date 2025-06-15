@@ -154,8 +154,6 @@ class OpticalFlowNode(object):
         
         # Check if altitude data is recent
         duration_from_last_altitude = rospy.Time.now() - self.altitude_ts
-        if duration_from_last_altitude.to_sec() > 10:
-            rospy.logwarn("No altitude data received for {:.1f} seconds".format(duration_from_last_altitude.to_sec()))
 
     def altitude_cb(self, msg):
         """
