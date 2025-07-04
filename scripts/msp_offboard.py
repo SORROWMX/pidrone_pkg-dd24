@@ -41,6 +41,11 @@ class MSPOffboard:
         self.position_tolerance = 0.1  # m
         self.stabilization_time = 2.0  # seconds
         
+        # Use PID controller for throttle instead of calculating it here
+        self.use_pid_throttle = rospy.get_param('~use_pid_throttle', True)
+        if self.use_pid_throttle:
+            print("Using PID controller for throttle - height control will be handled by pid_controller.py")
+        
         # Current state
         self.armed = False
         self.flying = False
@@ -52,6 +57,9 @@ class MSPOffboard:
         self.target_yaw = 0.0
         self.control_mode = 'position'  # 'position' or 'velocity'
         self.last_command = list(cmds.disarm_cmd)  # Store last command for comparison
+        
+        # Latest fly commands from PID controller
+        self.latest_pid_commands = {'roll': 1500, 'pitch': 1500, 'throttle': 1000, 'yaw': 1500}
         
         # Locks for thread safety
         self.state_lock = Lock()
@@ -110,6 +118,15 @@ class MSPOffboard:
         rospy.Service('/pidrone/msp_offboard/set_velocity', Trigger, set_velocity_service_handler(self.set_velocity))
         rospy.Service('/pidrone/msp_offboard/set_position', Trigger, set_position_service_handler(self.set_position))
         rospy.Service('/pidrone/msp_offboard/get_telemetry', Trigger, self.get_telemetry_service)
+        
+        # Subscribers
+        rospy.Subscriber('/pidrone/range', Range, self.range_callback)
+        rospy.Subscriber('/pidrone/state', State, self.state_callback)
+        rospy.Subscriber('/pidrone/picamera/twist', TwistStamped, self.velocity_callback)
+        
+        # Subscribe to PID controller fly commands
+        if self.use_pid_throttle:
+            rospy.Subscriber('/pidrone/fly_commands', RC, self.pid_commands_callback)
         
         # Start timers
         self.command_timer = rospy.Timer(rospy.Duration(0.05), self.command_timer_callback)
@@ -362,27 +379,34 @@ class MSPOffboard:
         # Calculate position errors
         pos_error_x = self.target_position['x'] - self.current_position['x']
         pos_error_y = self.target_position['y'] - self.current_position['y']
-        pos_error_z = self.target_position['z'] - self.current_height
         
         # Coefficients for converting errors to commands
         kp_xy = 100  # Coefficient for horizontal movement
-        kp_z = 200   # Coefficient for vertical movement
         
         # Limit maximum error for safety
         pos_error_x = max(min(pos_error_x, 0.5), -0.5)
         pos_error_y = max(min(pos_error_y, 0.5), -0.5)
-        pos_error_z = max(min(pos_error_z, 0.2), -0.2)
         
         # Convert errors to RC commands (1000-2000)
         roll_cmd = 1500 + int(kp_xy * pos_error_x)
         pitch_cmd = 1500 + int(kp_xy * pos_error_y)
-        throttle_cmd = 1000 + int(kp_z * pos_error_z)
-        yaw_cmd = 1500  # Not using yaw control for now
         
         # Limit commands
         roll_cmd = max(min(roll_cmd, 1700), 1300)
         pitch_cmd = max(min(pitch_cmd, 1700), 1300)
-        throttle_cmd = max(min(throttle_cmd, 1400), 1100)
+        
+        # Use throttle from PID controller if enabled, otherwise calculate it here
+        if self.use_pid_throttle:
+            throttle_cmd = self.latest_pid_commands['throttle']
+            yaw_cmd = self.latest_pid_commands['yaw']
+        else:
+            # Calculate throttle based on position error
+            pos_error_z = self.target_position['z'] - self.current_height
+            pos_error_z = max(min(pos_error_z, 0.2), -0.2)
+            kp_z = 200  # Coefficient for vertical movement
+            throttle_cmd = 1000 + int(kp_z * pos_error_z)
+            throttle_cmd = max(min(throttle_cmd, 1400), 1100)
+            yaw_cmd = 1500  # Not using yaw control for now
         
         # Update command in order [roll, pitch, throttle, yaw] to match AETR map in INAV
         self.current_command = [roll_cmd, pitch_cmd, throttle_cmd, yaw_cmd, 1900, 1000, 1000, 1000]
@@ -391,19 +415,26 @@ class MSPOffboard:
         """Update command in velocity control mode"""
         # Coefficients for converting velocities to commands
         kv_xy = 200  # Coefficient for horizontal velocity
-        kv_z = 300   # Coefficient for vertical velocity
         
         # Convert velocities to RC commands (1000-2000)
         roll_cmd = 1500 + int(kv_xy * self.target_velocity['x'])
         pitch_cmd = 1500 + int(kv_xy * self.target_velocity['y'])
-        throttle_cmd = 1000 + int(kv_z * self.target_velocity['z'])
-        yaw_cmd = 1500 + int(self.target_yaw * 100)  # Coefficient for angular velocity
         
         # Limit commands
         roll_cmd = max(min(roll_cmd, 1700), 1300)
         pitch_cmd = max(min(pitch_cmd, 1700), 1300)
-        throttle_cmd = max(min(throttle_cmd, 1400), 1100)
-        yaw_cmd = max(min(yaw_cmd, 1700), 1300)
+        
+        # Use throttle from PID controller if enabled, otherwise calculate it here
+        if self.use_pid_throttle:
+            throttle_cmd = self.latest_pid_commands['throttle']
+            yaw_cmd = self.latest_pid_commands['yaw']
+        else:
+            # Calculate throttle based on velocity
+            kv_z = 300   # Coefficient for vertical velocity
+            throttle_cmd = 1000 + int(kv_z * self.target_velocity['z'])
+            throttle_cmd = max(min(throttle_cmd, 1400), 1100)
+            yaw_cmd = 1500 + int(self.target_yaw * 100)  # Coefficient for angular velocity
+            yaw_cmd = max(min(yaw_cmd, 1700), 1300)
         
         # Update command in order [roll, pitch, throttle, yaw] to match AETR map in INAV
         self.current_command = [roll_cmd, pitch_cmd, throttle_cmd, yaw_cmd, 1900, 1000, 1000, 1000]
@@ -933,6 +964,14 @@ class MSPOffboard:
         except Exception as e:
             rospy.logerr("Error sending RC command: {}".format(e))
             # Don't raise exception to continue program execution
+
+    def pid_commands_callback(self, msg):
+        """Handler for fly commands from PID controller"""
+        with self.command_lock:
+            self.latest_pid_commands['roll'] = msg.roll
+            self.latest_pid_commands['pitch'] = msg.pitch
+            self.latest_pid_commands['throttle'] = msg.throttle
+            self.latest_pid_commands['yaw'] = msg.yaw
 
 def main():
     import sys

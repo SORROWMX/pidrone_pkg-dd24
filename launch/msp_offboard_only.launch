@@ -3,18 +3,29 @@
     <include file="$(find pidrone_pkg)/launch/tof.launch" />
     <include file="$(find pidrone_pkg)/launch/raspicam_node.launch" />
     
+    <!-- Общие параметры для всех узлов -->
+    <arg name="target_height" default="0.3" />
+    
     <!-- Запуск модифицированных узлов в следующем порядке -->
     <node name="state_estimator" pkg="pidrone_pkg" type="state_estimator.py" args="-p ukf7d" output="screen" />
-    <node name="pid_controller" pkg="pidrone_pkg" type="pid_controller.py" output="screen" />
+    
+    <!-- PID Controller with enhanced throttle control for better height stability -->
+    <node name="pid_controller" pkg="pidrone_pkg" type="pid_controller.py" output="screen">
+        <param name="enhanced_throttle" value="true" />
+        <param name="target_height" value="$(arg target_height)" />
+    </node>
+    
     <node name="optical_flow_node" pkg="pidrone_pkg" type="optical_flow_node.py" output="screen" />
     <node name="rigid_transform_node" pkg="pidrone_pkg" type="rigid_transform_node.py" output="screen" />
     
     <!-- Launch MSP Offboard - Modified version with enhanced board communication -->
     <!-- This node combines functionality from flight_controller_node.py and original msp_offboard.py -->
-    <node name="msp_offboard" pkg="pidrone_pkg" type="msp_offboard.py" output="screen" />
+    <node name="msp_offboard" pkg="pidrone_pkg" type="msp_offboard.py" output="screen">
+        <param name="use_pid_throttle" value="true" />
+    </node>
     
     <!-- Parameters for MSP Offboard -->
-    <param name="msp_offboard/default_takeoff_height" value="0.3" />
+    <param name="msp_offboard/default_takeoff_height" value="$(arg target_height)" />
     <param name="msp_offboard/height_tolerance" value="0.05" />
     <param name="msp_offboard/position_tolerance" value="0.1" />
     

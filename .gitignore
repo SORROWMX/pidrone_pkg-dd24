@@ -18,3 +18,5 @@ logs/*
 
 clover-master/
 inav-master/
+scripts/height_control_flight.py
+scripts/README_enhanced_height_control.md

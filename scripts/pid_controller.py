@@ -21,7 +21,7 @@ class PIDController(object):
     error calculated by the desired and current velocity and position of the drone
     '''
 
-    def __init__(self):
+    def __init__(self, use_enhanced_throttle=False, target_height=0.3):
         # Initialize the current and desired modes
         self.current_mode = Mode('DISARMED')
         self.desired_mode = Mode('DISARMED')
@@ -58,7 +58,7 @@ class PIDController(object):
         self.desired_yaw_velocity_start_time = None
 
         # Initialize the primary PID
-        self.pid = PID()
+        self.pid = PID(use_enhanced_throttle=use_enhanced_throttle, target_height=target_height)
 
         # Initialize the error used for the PID which is vx, vy, z where vx and
         # vy are velocities, and z is the error in the altitude of the drone
@@ -361,6 +361,19 @@ def main(ControllerClass):
         help="Verbosity between 0 and 2, 2 is most verbose"
         )
     
+    parser.add_argument(
+        '--enhanced-throttle',
+        action='store_true',
+        help="Use enhanced throttle controller from height_control_flight.py"
+        )
+    
+    parser.add_argument(
+        '--target-height',
+        type=float,
+        default=0.3,
+        help="Target height for the drone in meters (default: 0.3)"
+        )
+    
     # Parse known arguments and ignore the rest (ROS args)
     args, unknown_args = parser.parse_known_args(filtered_argv)
 
@@ -369,8 +382,11 @@ def main(ControllerClass):
     node_name = os.path.splitext(os.path.basename(__file__))[0]
     rospy.init_node(node_name)
 
-    # create the PIDController object
-    pid_controller = ControllerClass()
+    # create the PIDController object with enhanced throttle if requested
+    pid_controller = ControllerClass(
+        use_enhanced_throttle=args.enhanced_throttle,
+        target_height=args.target_height
+    )
 
     # Publishers
     ############
@@ -396,6 +412,8 @@ def main(ControllerClass):
     # set the loop rate (Hz)
     loop_rate = rospy.Rate(60)
     print('PID Controller Started')
+    if args.enhanced_throttle:
+        print('Using enhanced throttle controller with target height: {:.2f}m'.format(args.target_height))
     while not rospy.is_shutdown():
         pid_controller.heartbeat_pub.publish(Empty())
 
