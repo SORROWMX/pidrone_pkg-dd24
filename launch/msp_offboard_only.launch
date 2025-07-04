@@ -7,7 +7,7 @@
     <arg name="target_height" default="0.3" />
     
     <!-- Запуск модифицированных узлов в следующем порядке -->
-    <node name="state_estimator" pkg="pidrone_pkg" type="state_estimator.py" args="-p ukf7d" output="screen" />
+    <node name="state_estimator" pkg="pidrone_pkg" type="state_estimator.py" args="-p ema" output="screen" />
     
     <!-- PID Controller with enhanced throttle control for better height stability -->
     <node name="pid_controller" pkg="pidrone_pkg" type="pid_controller.py" output="screen">
